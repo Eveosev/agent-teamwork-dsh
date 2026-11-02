@@ -120,10 +120,11 @@ export function TeamStatus() {
   const { data, error, reload } = usePoll(() => call('GET teams'), [])
   const [task, setTask] = useState('')
   const [title, setTitle] = useState('')
+  const [directory, setDirectory] = useState('')
   const create = useAction(async () => {
-    const request = { task: task.trim(), ...(title.trim() ? { title: title.trim() } : {}) }
+    const request = { task: task.trim(), ...(title.trim() ? { title: title.trim() } : {}), ...(directory.trim() ? { directory: directory.trim() } : {}) }
     const { team } = await call('POST teams', { body: request })
-    setTask(''); setTitle('')
+    setTask(''); setTitle(''); setDirectory('')
     await reload()
     navigate({ page: 'team', id: team.id })
   })
@@ -148,6 +149,12 @@ export function TeamStatus() {
         <label htmlFor="dt-team-title">{t('teamTitleLabel')}</label>
         <Input id="dt-team-title" value={title} placeholder={t('teamTitlePlaceholder')}
           onChange={event => setTitle(event.target.value)} />
+      </div>
+      <div className="dt-field">
+        <label htmlFor="dt-team-directory">{t('teamDirectoryRun')}</label>
+        <Input id="dt-team-directory" className="dt-mono" value={directory} placeholder={t('teamDirectoryRunPlaceholder')}
+          onChange={event => setDirectory(event.target.value)} />
+        <div className="dt-hint">{t('teamDirectoryRunHint')}</div>
       </div>
       <div className="dt-actions">
         <Button variant="primary" type="submit" icon={<Icon name="plus" size={14} />}
@@ -182,6 +189,7 @@ export function TeamPage({ id }: { id: string }) {
       <LabelValue label={t('teamCreated')} value={<When at={data.created_at} />} />
       <LabelValue label={running ? t('teamRunningFor') : t('teamDuration')}
         value={durationText(t, data.created_at, end)} />
+      <LabelValue label={t('teamDirectory')} value={<span className="dt-mono">{data.directory}</span>} />
       {running && <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
         message={t('teamStopConfirm', { title: data.title })}
         onConfirm={async () => { await call('POST teams/:id/stop', { id }); await reload() }} />}

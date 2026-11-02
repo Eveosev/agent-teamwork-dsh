@@ -74,6 +74,8 @@ Open the panel's **Execution settings** and edit **Worker profiles** as JSON, th
 
 ## Apply the example
 
+The example assumes the `llm-center` provider and its `deepseek-v4.1-flash-mb` and `glm-5.3-mb` models, which is how this checkout reaches the gateway. Replace the provider and model ids with the routes your DSH profile exposes. For a different provider per role, create that provider in the DSH Models page first; a profile whose provider is not registered fails at the first model call.
+
 With the panel running, `pnpm seed:profiles` reads `examples/team-profiles.json`, takes the current executor block revision, and saves the six roles with `developer` as the default. Override `TEAMWORK_BASE_URL` (default `http://127.0.0.1:3092`) or `DEFAULT_PROFILE` when needed. The script prints the HTTP status and never reads a credential.
 
 Check the gateway before starting a team: `ANTHROPIC_AUTH_TOKEN=... pnpm spike:gateway` reports whether the Anthropic route accepts `x-api-key`, `Authorization: Bearer`, or both.

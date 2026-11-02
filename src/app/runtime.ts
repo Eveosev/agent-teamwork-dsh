@@ -205,6 +205,8 @@ export class Runtime extends Service implements SourceHost {
   private async initialize(): Promise<void> {
     // Register management HTTP routes before setup completes so operators can fix setup problems in the UI.
     this.disposers.push(registerHttp(this.ctx, this.httpHost()))
+    // `/team` does not need the Ticket pipeline, so it stays available while setup still blocks Tickets.
+    this.registerTeamCommand()
     if (!await this.setup.run(this.store.settings())) {
       this.runtimeHealth.set({ ...health('paused', 'setupPending'), at: now() })
       return
@@ -212,7 +214,6 @@ export class Runtime extends Service implements SourceHost {
     this.sessions.install()
     this.executor.install()
     await this.sessions.ensure(this.masterId, this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
-    this.registerTeamCommand()
     for (const id of this.settings.syncable()) await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
     // If stop() was called while awaiting setup, session creation, or policy sync, do not start background loops.
     if (this.closing()) return

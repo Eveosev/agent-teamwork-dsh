@@ -22,6 +22,19 @@ describe('/team', () => {
     expect((await host.api('GET', 'teams')).body.items).toHaveLength(1)
   })
 
+  it('creates, reads and stops teams through the panel API', async () => {
+    const created = await host.api('POST', 'teams', { task: 'API task', title: 'API team', directory: '/tmp/api-team' })
+    expect(created.status).toBe(200)
+    const team = created.body.team as { id: string; directory: string }
+    expect(team.directory).toBe('/tmp/api-team')
+    expect((await host.api('GET', `teams/${team.id}`)).body).toMatchObject({ task: 'API task', directory: '/tmp/api-team' })
+    expect((await host.api('GET', 'teams/missing')).status).toBe(404)
+    const settings = host.runtime.store.settings()
+    host.runtime.store.saveSettings({ ...settings, paused: true })
+    expect((await host.api('POST', 'teams', { task: 'blocked' })).status).toBe(400)
+    host.runtime.store.saveSettings({ ...settings, paused: false })
+  })
+
   it('reports status, refuses while paused, and stops a running team', async () => {
     await vi.waitFor(() => expect(command()).toBeDefined())
     const agent = host.agents.get(host.runtime.masterId)

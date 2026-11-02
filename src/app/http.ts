@@ -194,6 +194,10 @@ function routes(runtime: HttpHost): Routes {
     'GET teams/:id': ({ params }) => team(params.id),
     'POST teams': async ({ body }) => {
       const request = TeamCreateRequest.parse(await body())
+      const settings = store.settings()
+      if (settings.paused) throw new RouteError(400, 'Processing is paused; resume it before starting a team')
+      const limit = Math.min(3, Math.max(1, settings.executor.maxWorkers))
+      if (runtime.teams.activeCount >= limit) throw new RouteError(400, `At most ${limit} teams run at once; wait for one to finish`)
       const agent = await runtime.sessions.ensure(runtime.masterId, runtime.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
       return { team: runtime.teams.create(request.task, agent, request.title ?? '', request.directory) }
     },
