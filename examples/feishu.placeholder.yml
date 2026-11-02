@@ -1,0 +1,13 @@
+# Feishu source placeholder for Agent Teamwork v0.1.
+# Keep it disabled until the bot app and its chat ids exist; the panel then
+# reports the Source as "not configured" instead of failing startup.
+enabled: false
+config:
+  cli: ''
+  chats: []
+  directMessages: true
+# From the Feishu developer console (app id) and GET /open-apis/im/v1/chats (chat id):
+# appId: <app id>
+# chatId: <oc_...>
+# allowedOpenIds:
+#   - <ou_...>

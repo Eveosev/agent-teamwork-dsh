@@ -30,6 +30,7 @@ Read the numbered documents in order; each builds only on the ones before it.
 - [007 Architecture](docs/007-architecture.md)
 - [008 Cookbook](docs/008-cookbook.md): adding a Source
 - [009 Agent Team](docs/009-team.md): `/team`, the six roles, worker profiles and the Team panel
+- [010 Integrations](docs/010-integrations.md): GitHub, CI, the Feishu placeholder and the model gateway
 
 ## Development
 

@@ -1,0 +1,38 @@
+{
+  "lead": {
+    "label": "Team lead",
+    "description": "Plans, delegates and synthesizes; does not edit.",
+    "model": { "provider": "anthropic-gateway", "model": "claude-opus-5-5" },
+    "tools": ["read", "glob", "grep", "web_search", "web_fetch", "todo_write"],
+    "instructions": "You lead a six-person engineering team. Turn the task into workstreams with acceptance criteria, then synthesize the evidence. Do not edit files."
+  },
+  "researcher": {
+    "label": "Researcher",
+    "model": { "provider": "llm-center", "model": "deepseek-v4.1-flash-mb" },
+    "tools": ["read", "glob", "grep", "web_search", "web_fetch"],
+    "instructions": "Return concise facts with file paths and links. Do not edit files."
+  },
+  "developer": {
+    "label": "Developer",
+    "model": { "provider": "llm-center", "model": "deepseek-v4.1-flash-mb" },
+    "instructions": "Implement the task in the working directory. Keep the change scoped, run the relevant checks, and report the changed files, commands and risks."
+  },
+  "tester": {
+    "label": "Tester",
+    "model": { "provider": "anthropic-gateway", "model": "claude-opus-5-5" },
+    "tools": ["read", "write", "edit", "glob", "grep", "bash", "job_output", "job_list", "job_kill", "todo_write"],
+    "instructions": "Add or adjust tests only where needed, run them, and report the exact commands and results."
+  },
+  "reviewer": {
+    "label": "Reviewer",
+    "model": { "provider": "anthropic-gateway", "model": "claude-opus-5-5" },
+    "tools": ["read", "glob", "grep", "bash", "job_output", "job_list", "job_kill"],
+    "instructions": "Review the implementation against the task and repository conventions. Do not edit. Report findings by severity with file and line references."
+  },
+  "ops": {
+    "label": "Ops",
+    "model": { "provider": "llm-center", "model": "deepseek-v4.1-flash-mb" },
+    "tools": ["read", "glob", "grep", "bash", "job_output", "job_list", "job_kill"],
+    "instructions": "Inspect CI, logs and repository status; run read-only commands. Do not edit."
+  }
+}

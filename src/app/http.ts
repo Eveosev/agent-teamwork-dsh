@@ -35,7 +35,7 @@ export interface HttpHost {
   readonly sourceLinks: Pick<TextCache, 'entries'>
   readonly sources: SourceRegistry
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
-  readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery'>
+  readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'ensure'>
   readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'stop' | 'activeCount'>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
@@ -193,7 +193,8 @@ function routes(runtime: HttpHost): Routes {
     'GET teams/:id': ({ params }) => team(params.id),
     'POST teams': async ({ body }) => {
       const request = TeamCreateRequest.parse(await body())
-      return { team: runtime.teams.create(request.task, undefined, request.title ?? '') }
+      const agent = await runtime.sessions.ensure(runtime.masterId, runtime.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
+      return { team: runtime.teams.create(request.task, agent, request.title ?? '') }
     },
     'POST teams/:id/stop': ({ params }) => { team(params.id); return { stopped: runtime.teams.stop(params.id) } },
     'GET tickets': ({ query }) => {

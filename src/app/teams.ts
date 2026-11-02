@@ -83,16 +83,18 @@ export class Teams {
 
   /** Creates and starts a team for `task`; refuses while paused or when too many teams already run. */
   create(task: string, parent?: Agent, title = ''): Team {
-    if (this.host.settings().paused) throw new Error('Processing is paused; resume it before starting a team')
-    if (this.active.size >= MAX_ACTIVE_TEAMS) throw new Error(`At most ${MAX_ACTIVE_TEAMS} teams run at once; wait for one to finish`)
+    const settings = this.host.settings()
+    if (settings.paused) throw new Error('Processing is paused; resume it before starting a team')
+    const limit = Math.min(MAX_ACTIVE_TEAMS, Math.max(1, settings.executor.maxWorkers))
+    if (this.active.size >= limit) throw new Error(`At most ${limit} teams run at once; wait for one to finish`)
     const agent = parent ?? this.host.context.agents.get(this.host.masterId as never)
     if (!agent) throw new Error('The main Session is not running; open it once before starting a team')
     const at = new Date().toISOString()
     const id = `team-${key('team', task, agent.id, at)}`
-    const profiles = this.host.settings().executor.profiles
+    const profiles = settings.executor.profiles
     const team: Team = { id, title: (title.trim() || task.trim().split('\n')[0]!.slice(0, 80)) || 'Agent team', task, state: 'running',
       created_at: at, updated_at: at, parent_session_id: agent.id, members: TEAM_ROLES.map(role => ({ role,
-        profile: profiles[role] ? role : this.host.settings().executor.defaultProfile ?? null, state: 'idle' })) }
+        profile: profiles[role] ? role : settings.executor.defaultProfile ?? null, state: 'idle' })) }
     this.save(team, true)
     const controller = new AbortController()
     this.active.set(id, controller)

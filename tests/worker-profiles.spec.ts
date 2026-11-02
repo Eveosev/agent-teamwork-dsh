@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { SettingsSchema, assessmentOutcome } from '../src/policy.ts'
 import type { Ticket } from '../src/core/model.ts'
@@ -14,6 +15,13 @@ describe('worker profiles', () => {
     const settings = SettingsSchema.parse({ executor: { profiles, defaultProfile: 'developer' } })
     expect(settings.executor.profiles.planner!.model).toEqual({ provider: 'anthropic-gateway', model: 'claude-opus-5-5[1m]' })
     expect(settings.executor.defaultProfile).toBe('developer')
+  })
+
+  it('validates the six-role example profiles', () => {
+    const example = JSON.parse(readFileSync(new URL('../examples/team-profiles.json', import.meta.url), 'utf8'))
+    const parsed = SettingsSchema.parse({ executor: { profiles: example, defaultProfile: 'developer' } })
+    expect(Object.keys(parsed.executor.profiles)).toEqual(['lead', 'researcher', 'developer', 'tester', 'reviewer', 'ops'])
+    expect(parsed.executor.profiles.lead!.tools).not.toContain('write')
   })
 
   it('refuses a default that names no profile', () => {

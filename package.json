@@ -48,7 +48,9 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "spike:gateway": "node scripts/spike-gateway.mjs",
+    "seed:profiles": "node scripts/seed-team-profiles.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0",

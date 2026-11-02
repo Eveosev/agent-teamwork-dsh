@@ -71,3 +71,9 @@ Open the panel's **Execution settings** and edit **Worker profiles** as JSON, th
 - The id is stored on `ticket.execution.profile`, shown on ticket cards and details, and survives restarts through the Store.
 - Changing a profile affects new runs of its Tickets; an already-created Session keeps the model and preset it was created with, as with `executor.model`.
 - Tool limits apply to the Executor Session and its spawned subagents; the prompt still tells the worker to stay within the Ticket scope.
+
+## Apply the example
+
+With the panel running, `pnpm seed:profiles` reads `examples/team-profiles.json`, takes the current executor block revision, and saves the six roles with `developer` as the default. Override `TEAMWORK_BASE_URL` (default `http://127.0.0.1:3092`) or `DEFAULT_PROFILE` when needed. The script prints the HTTP status and never reads a credential.
+
+Check the gateway before starting a team: `ANTHROPIC_AUTH_TOKEN=... pnpm spike:gateway` reports whether the Anthropic route accepts `x-api-key`, `Authorization: Bearer`, or both.
