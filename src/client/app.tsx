@@ -13,6 +13,7 @@ import { HOME, TABS, initialLocation, lastSettingsGroup, remember, routeLabel, s
   type Tab } from './route.ts'
 import { SettingsPage } from './settings.tsx'
 import { SourceStatus } from './source.tsx'
+import { TeamPage, TeamStatus } from './team.tsx'
 import { actorName, errorText, reasonLabel, valueLabel, type T, readableMarkers } from './text.ts'
 import { ThreadPage } from './thread.tsx'
 import { TicketPage } from './ticket.tsx'
@@ -154,6 +155,7 @@ function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab
         paused={!!state?.paused} />
       case 'execution': return route.id !== undefined ? <TicketPage key={route.id} id={route.id} />
         : state ? <ExecutionStatus filter={route.query?.filter ?? 'open'} state={state} reload={reload} /> : waiting
+      case 'team': return route.id !== undefined ? <TeamPage key={route.id} id={route.id} /> : <TeamStatus />
       case 'settings': return state ? <SettingsPage key={state.masterId} group={route.query.group} query={route.query} state={state}
         deploymentForm={deploymentForm} /> : waiting
     }
