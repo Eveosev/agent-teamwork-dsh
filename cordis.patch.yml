@@ -106,9 +106,10 @@
                 config:
                   provider: spawn
                   toolName: subagent
-                  modelSelection: true
-                  modelDiscovery: true
+                  modelSelectionSettings: true
                   agentPreset: standard
+                  allowedAgentPresets:
+                    - standard
           - id: tool-todo
             name: '@deepseek-ai/dsh-tool-todo'
             config:
