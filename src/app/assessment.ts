@@ -25,6 +25,7 @@ export const AssessmentSchema = z.object({
       'Duplicate rule assessment IDs').describe('One per enabled rule.'),
   direction: AdmissionDirectionSchema.describe('Required for every decision.'),
   title: z.string().min(1).max(160),
+  profile: z.string().min(1).max(100).optional().describe('The worker profile to run this ticket under; omit for the configured default.'),
   worktree_name: WorktreeNameSchema.optional(),
   scope: z.string().max(1500),
   intent_evidence: z.string().trim().min(1).max(700).nullish().describe('For acceptance: the quotes that establish the three facts.'),
@@ -206,7 +207,11 @@ export class MasterAssessor implements Assessor {
     })() : { error: error ?? 'Call orchestrator_eval to load initial context', complete: false }
     const settings = this.host.settings()
     const others = candidate.triggers.filter(item => item.id !== trigger.id)
+    const profiles = Object.entries(settings.executor.profiles).map(([id, profile]) => ({ id,
+      ...profile.label ? { label: profile.label } : {}, ...profile.description ? { description: profile.description } : {},
+      ...profile.model ? { model: `${profile.model.provider}/${profile.model.model}` } : {} }))
     return { trigger_id: trigger.id, strength: candidate.strength, mode: settings.eval.mode,
+      ...profiles.length ? { worker_profiles: profiles, default_profile: settings.executor.defaultProfile ?? null } : {},
       source: { kind: trigger.source, actor: trigger.actor.id, thread: threadKey(trigger.threads[0]!), ...(trigger.url
         ? { url: trigger.url } : {}) },
       ...cut(trigger.text, TRIGGER_CHARS), ...imageIds(source?.messageId ?? '', trigger.text),

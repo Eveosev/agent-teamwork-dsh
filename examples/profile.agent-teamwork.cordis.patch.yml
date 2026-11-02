@@ -1,0 +1,43 @@
+# Example DSH profile for Agent Teamwork.
+# Copy to $DSH_HOME/profiles/<name>/cordis.patch.yml, replace the stateDir and
+# provider credentials, then create the profile's Sessions from the panel.
+# Never commit a token: the providers read the named environment variables.
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3092
+- id: dsh-superagent
+  config:
+    stateDir: <absolute path, for example /Users/me/.dsh/state/agent-teamwork>
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      llm-center:
+        apiKeyEnv: LLM_CENTER_API_KEY
+        api: openai-completions
+        baseURL: https://llm-center.modelbest.co/v1
+        models:
+          - id: deepseek-v4.1-flash-mb
+            name: deepseek-v4.1-flash
+            input: [text, image]
+      # Anthropic Messages gateway. DSH's adapter sends x-api-key; if the gateway
+      # requires `Authorization: Bearer $ANTHROPIC_AUTH_TOKEN`, front it with a
+      # tiny proxy that adds that header, or use an OpenAI-compatible route.
+      anthropic-gateway:
+        apiKeyEnv: ANTHROPIC_AUTH_TOKEN
+        api: anthropic-messages
+        baseURL: https://llm-center.modelbest.co
+        models:
+          - id: claude-opus-5-5
+            name: Claude Opus 5.5
+            input: [text, image]
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: llm-center
+    model: deepseek-v4.1-flash-mb
+# The Feishu Source stays off until a bot CLI and chat ids exist. Leaving it
+# disabled is intentional: the panel reports "not configured" and GitHub works.
+- id: dsh-superagent-feishu
+  disabled: true

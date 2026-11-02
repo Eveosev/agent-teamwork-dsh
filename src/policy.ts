@@ -30,6 +30,7 @@ export function directionAllowed(value: unknown): value is AdmissionDirection {
 export interface Assessment {
   decision: 'accept' | 'ignore' | 'unavailable'; rule_assessments: RuleAssessment[]; direction: unknown
   title: string; scope: string; reason: string; intent_evidence?: string | null; acknowledgement?: string | null; worktree_name?: string
+  profile?: string
 }
 /**
  * Validate an assessment against enabled rules and convert it into an engine `AssessmentOutcome`.
@@ -37,7 +38,7 @@ export interface Assessment {
  * inferred candidate only in `auto` mode (otherwise recording it as `would_accept`).
  * @throws when `rule_assessments` does not cover every enabled rule exactly once, or an accept omits `intent_evidence`.
  */
-export function assessmentOutcome(assessment: Assessment, settings: Pick<Settings, 'policy' | 'eval'>, strength: Strength): AssessmentOutcome {
+export function assessmentOutcome(assessment: Assessment, settings: Pick<Settings, 'policy' | 'eval' | 'executor'>, strength: Strength): AssessmentOutcome {
   const enabled = settings.policy.rules.filter(rule => rule.enabled)
   const judged = assessment.rule_assessments
   const ids = new Set(judged.map(item => item.rule_id))
@@ -52,12 +53,16 @@ export function assessmentOutcome(assessment: Assessment, settings: Pick<Setting
   if (!matches.length) return { kind: 'ignore', audit, reason: { code: 'noRuleMatched' } }
   if (!assessment.intent_evidence) throw new Error('Acceptance requires intent_evidence')
   const { title, scope, worktree_name: name } = assessment
+  const profile = assessment.profile ?? settings.executor.defaultProfile
+  if (profile !== undefined && !Object.hasOwn(settings.executor.profiles, profile)) {
+    throw new Error(`Unknown worker profile "${profile}"; use one of: ${Object.keys(settings.executor.profiles).join(', ') || 'none configured'}`)
+  }
   if (strength === 'inferred' && settings.eval.mode !== 'auto') {
     const proposal = { title, scope, worktree_name: name }
     return { kind: 'ignore', audit: { ...audit, would_accept: true, proposal }, reason: { code: 'observed', values: { text: assessment.reason } } }
   }
   return { kind: 'accept', title, scope, reason: assessment.reason, ...(assessment.acknowledgement ? { acknowledgement: assessment.acknowledgement } : {}),
-    rules: matches.map(match => match.rule_id), audit, ...(name ? { name } : {}) }
+    rules: matches.map(match => match.rule_id), audit, ...(name ? { name } : {}), ...(profile ? { profile } : {}) }
 }
 const DEFAULT_RULES = [
   { id: 'copy', name: 'Copy fixes', enabled: true, instruction: 'Explicit requests to correct a typo, wording, punctuation or existing translation. Preserve product promises and business meaning.' },
@@ -69,6 +74,16 @@ export const RuleSchema = z.object({ id: RuleIdSchema, name: z.string().trim().m
 export type Rule = z.infer<typeof RuleSchema>
 export const RoleModelSchema = z.object({ provider: z.string().trim().min(1), model: z.string().trim().min(1), reasoningEffort: z.string().trim().min(1).optional() }).strict()
 export type RoleModel = z.infer<typeof RoleModelSchema>
+/** A named worker role: the model and Agent preset its ticket's Session runs under. */
+export const WorkerProfileSchema = z.object({
+  label: z.string().trim().max(100).optional(),
+  description: z.string().trim().max(500).optional(),
+  model: RoleModelSchema.nullable().default(null),
+  preset: z.string().trim().min(1).max(200).optional(),
+  tools: z.array(z.string().trim().min(1)).optional().describe('Work tools this profile may use; omit for every work tool.'),
+  instructions: z.string().trim().max(4000).optional().describe('Role instructions appended to the worker prompt.'),
+}).strict()
+export type WorkerProfile = z.infer<typeof WorkerProfileSchema>
 
 export const AllowedSchema = z.object({ id: z.string().trim().min(1).max(200), name: z.string().trim().max(100).optional() }).strict()
 const Weak = z.enum(['inferred', 'ignore'])
@@ -90,11 +105,14 @@ const CommandNameSchema = z.string().regex(/^[A-Za-z0-9._-]+$/).refine(name => n
 /** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, and blocked commands. */
 export const ExecutorConfigSchema = z.object({
   model: RoleModelSchema.nullable().default(null),
+  profiles: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/, 'Use lowercase kebab-case profile ids'), WorkerProfileSchema).default({}),
+  defaultProfile: z.string().trim().min(1).optional(),
   maxWorkers: z.number().int().min(LIMITS.maxWorkers.min).max(LIMITS.maxWorkers.max).default(3),
   directory: z.string().trim().refine(path => path === '' || path.startsWith('/'), 'An absolute path, or empty for <stateDir>/work').default(''),
   prepare: z.string().max(LIMITS.prepareCommand).default(''),
   blockedCommands: z.array(CommandNameSchema).default([]),
-}).strict()
+}).strict().refine(config => config.defaultProfile === undefined || Object.hasOwn(config.profiles, config.defaultProfile),
+  { message: 'defaultProfile must name one of executor.profiles', path: ['defaultProfile'] })
 export const SourceInstanceSchema = z.object({ enabled: z.boolean().default(true), config: z.record(z.string(), z.unknown()).default({}) }).strict()
 export const SettingsSchema = z.object({
   paused: z.boolean().default(false),

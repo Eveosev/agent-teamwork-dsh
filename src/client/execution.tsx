@@ -77,10 +77,14 @@ export function ExecutionSettings() {
   const { blocks, environment, sources } = useSettings().settings
   // Keep raw user text (such as separators between blocked commands) in the draft and parse only on save.
   const executor = blocks.executor.value
-  const saved = { ...executor, maxWorkers: String(executor.maxWorkers), blockedCommands: executor.blockedCommands.join(' ') }
+  const saved = { ...executor, maxWorkers: String(executor.maxWorkers), blockedCommands: executor.blockedCommands.join(' '),
+    defaultProfile: executor.defaultProfile ?? '' }
   const draft = useBlockDraft('executor', saved, blocks.executor.revision,
-    value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), blockedCommands: value.blockedCommands.split(/[\s,]+/).filter(Boolean) }))
+    value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), blockedCommands: value.blockedCommands.split(/[\s,]+/).filter(Boolean),
+      ...(value.defaultProfile.trim() ? { defaultProfile: value.defaultProfile.trim() } : { defaultProfile: undefined }) }))
   const value = draft.value
+  const [profileText, setProfileText] = useState(JSON.stringify(executor.profiles, null, 2))
+  const [profileError, setProfileError] = useState('')
   const edit = (next: Partial<typeof value>) => draft.edit({ ...value, ...next })
   const prepare = useRef<HTMLTextAreaElement>(null)
   const insert = (key: string) => {
@@ -96,6 +100,22 @@ export function ExecutionSettings() {
           <h2 className="dt-block-title">{t('term.executor')}<InfoTip text={t('executorIntro')} /></h2>
           <Section title={t('executorModel')} hint={t('executorModelHint')}><ModelField id="dt-worker-model" value={value.model}
             onChange={model => edit({ model })} /></Section>
+          <Field label={t('workerProfiles')} hint={t('workerProfilesHint')} note={profileError ? <span className="dt-error">{profileError}</span> : undefined}>
+            <textarea className="dt-textarea dt-mono" rows={8} spellCheck={false} value={profileText}
+              onChange={event => {
+                const text = event.target.value
+                setProfileText(text)
+                try {
+                  const parsed = JSON.parse(text) as unknown
+                  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(t('workerProfilesObject'))
+                  edit({ profiles: parsed as typeof value.profiles }); setProfileError('')
+                } catch (error) { setProfileError(`${t('workerProfilesInvalid')} ${String(error).slice(0, 160)}`) }
+              }} />
+          </Field>
+          <Field label={t('defaultProfile')} hint={t('defaultProfileHint')}>
+            <Input className="dt-mono" value={value.defaultProfile} placeholder={t('defaultProfileEmpty')}
+              onChange={event => edit({ defaultProfile: event.target.value })} />
+          </Field>
           <Field label={t('maxWorkers')} hint={t('maxWorkersHint')}>
             <Input type="number" min={LIMITS.maxWorkers.min} max={LIMITS.maxWorkers.max} required value={value.maxWorkers}
               onChange={event => edit({ maxWorkers: event.target.value })} />
