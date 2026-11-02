@@ -240,6 +240,12 @@ Each model request binds the Session to the current prompt revision. The revisio
 
 `status` and `promptVersion` serve prompt pages. Saves go through `Prompts.save` and notify the main Session. `modelRetry` exposes model-budget retry state.
 
+### Agent Team
+
+`Teams` (`src/app/teams.ts`) is a second execution mode beside Tickets. `/team <task>` is a DSH slash command registered by `Runtime.registerTeamCommand`; the panel's **Team** tab uses `GET/POST /orchestrator/api/teams`. A Team is a durable record in the KV store, not a Ticket: it has no Trigger, Eval, worktree, PR or outbound reply, so it does not consume a Worker slot.
+
+`Teams.create` refuses while processing is paused, and limits concurrent teams to the smaller of three and `executor.maxWorkers`. It starts six roles as managed DSH subagents through `ctx.subagents.startActivation` with `provider: 'spawn'`, `delivery: 'caller'`, the role's worker profile model and preset, and the parent main Session. The flow is lead plan → researcher and developer in parallel → tester and reviewer in parallel → ops → lead synthesis. Each role's text, state, child Session id and error are saved; the final synthesis is `team.summary`. A stop aborts the team's signal and disposes its activations. A process restart marks a running team `failed`, because child subagents are not resumed automatically. Role tool allowlists apply to Executor Sessions, not to subagents; team roles rely on their instructions and the sandbox.
+
 ### Glue
 
 | Glue | Translates |
@@ -409,6 +415,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |
 | `tests/worker-profiles.spec.ts` | Named worker profiles: parsing, the default, selection on acceptance, refusal of an unknown id, and the profile on Execution metadata and ticket cards |
 | `tests/teams.spec.ts` | The six-role team runtime: role order, per-profile models, pause refusal, stop, evidence and the final summary |
+| `tests/team-command.spec.ts` | `/team` registration on the real Runtime harness, a completed team through the panel API, status, pause refusal and stop |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
