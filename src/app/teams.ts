@@ -57,7 +57,7 @@ export class Teams {
 
   /** Lists teams newest first, with member states and a short summary. */
   list(): TeamSummary[] {
-    const ids = this.host.store.get(KV.teams.index) ?? []
+    const ids = [...(this.host.store.get(KV.teams.index) ?? [])].reverse()
     return ids.flatMap(id => { const team = this.get(id); return team ? [{ id: team.id, title: team.title, state: team.state,
       created_at: team.created_at, updated_at: team.updated_at, members: team.members.map(member => ({ role: member.role,
         state: member.state })), ...team.summary ? { summary: team.summary } : {} }] : [] })
@@ -66,6 +66,20 @@ export class Teams {
   get(id: string): Team | undefined { return this.host.store.get(KV.teams.record(id)) }
   /** Number of teams currently executing. */
   get activeCount(): number { return this.active.size }
+
+  /** Marks teams left running by a previous process as failed: their subagents cannot be recovered across a restart. */
+  recover(): void {
+    for (const id of this.host.store.get(KV.teams.index) ?? []) {
+      const team = this.get(id)
+      if (!team || team.state !== 'running') continue
+      team.state = 'failed'; team.error = 'The process restarted while this team was running'
+      for (const member of team.members) if (member.state === 'running') { member.state = 'failed'; member.error ??= team.error }
+      this.save(team)
+    }
+  }
+
+  /** Aborts every running team, for shutdown. */
+  stopAll(): void { for (const id of [...this.active.keys()]) this.stop(id) }
 
   /** Creates and starts a team for `task`; refuses while paused or when too many teams already run. */
   create(task: string, parent?: Agent, title = ''): Team {
