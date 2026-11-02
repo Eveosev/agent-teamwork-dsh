@@ -18,7 +18,7 @@ function bench(options: { paused?: boolean; pending?: boolean } = {}) {
       stopReason: 'completed' as const })
     return { childId: `child-${runs.length}`, result, dispose: async () => {} }
   }) }
-  const host: TeamsHost = { context: { subagents } as never, masterId: 'master', settings: () => settings(options.paused),
+  const host: TeamsHost = { context: { subagents } as never, masterId: 'master', stateDir: '/tmp/team-state', settings: () => settings(options.paused),
     logger: { warn: () => {} }, store: { get: key => values.get(key) as never, set: (key, value) => { values.set(key, value) },
       atomic: <T>(run: () => T) => run() } }
   return { teams: new Teams(host), runs, subagents }

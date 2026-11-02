@@ -327,7 +327,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET teams': { answer: () => ({ items: [], active: 0 }) },
   'GET teams/:id': { answer: ({ params }) => refuse(404, `No team ${params.id}`) },
   'POST teams': { body: true, answer: ({ body }) => ({ team: { id: 'team-test', title: body.task, task: body.task, state: 'running' as const,
-    created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z', parent_session_id: 'master', members: [] } }) },
+    created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z', parent_session_id: 'master', directory: '/tmp', members: [] } }) },
   'POST teams/:id/stop': { answer: () => ({ stopped: true }) },
   'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
     : 'open']) },

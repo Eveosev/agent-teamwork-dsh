@@ -2,6 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { mkdirSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { key } from '../core/ids.ts'
 import type { Settings } from '../policy.ts'
 import { KV } from '../kv.ts'
@@ -28,17 +30,17 @@ export interface TeamMember { role: TeamRole; profile: string | null; state: Mem
   started_at?: string; ended_at?: string }
 /** A durable team record, listed and inspected by the panel. */
 export interface Team { id: string; title: string; task: string; state: TeamState; created_at: string; updated_at: string
-  parent_session_id: string; members: TeamMember[]; summary?: string; error?: string }
+  parent_session_id: string; directory: string; members: TeamMember[]; summary?: string; error?: string }
 export interface TeamSummary { id: string; title: string; state: TeamState; created_at: string; updated_at: string
   members: { role: TeamRole; state: MemberState }[]; summary?: string }
 
 /** Structural subset of DSH's subagent service, kept local so the bundle does not depend on the package at build time. */
 interface Activation { childId: string; result: Promise<{ output: readonly { type: string; text?: string }[]; stopReason: string; diagnostic?: string }>
   dispose(): Promise<void> }
-interface Subagents { startActivation(spec: { provider: string; label: string; request: { prompt: ContentBlock[]; parent: Agent; agentPreset?: string;
+interface Subagents { startActivation(spec: { provider: string; label: string; request: { prompt: ContentBlock[]; parent: Agent; cwd?: string; agentPreset?: string;
   agentOptions?: { provider?: string; model?: string; reasoningEffort?: string } }; signal: AbortSignal; delivery: 'parent' | 'caller' }): Promise<Activation> }
 
-export interface TeamsHost { context: Context; store: Pick<Store, 'get' | 'set' | 'atomic'>; masterId: string; settings(): Settings
+export interface TeamsHost { context: Context; store: Pick<Store, 'get' | 'set' | 'atomic'>; masterId: string; stateDir: string; settings(): Settings
   logger: { warn(message: string): void } }
 const MAX_ACTIVE_TEAMS = 3
 const OUTPUT_LIMIT = 24_000
@@ -82,18 +84,21 @@ export class Teams {
   stopAll(): void { for (const id of [...this.active.keys()]) this.stop(id) }
 
   /** Creates and starts a team for `task`; refuses while paused or when too many teams already run. */
-  create(task: string, parent?: Agent, title = ''): Team {
+  create(task: string, parent?: Agent, title = '', requestedDirectory?: string): Team {
     const settings = this.host.settings()
     if (settings.paused) throw new Error('Processing is paused; resume it before starting a team')
     const limit = Math.min(MAX_ACTIVE_TEAMS, Math.max(1, settings.executor.maxWorkers))
     if (this.active.size >= limit) throw new Error(`At most ${limit} teams run at once; wait for one to finish`)
     const agent = parent ?? this.host.context.agents.get(this.host.masterId as never)
     if (!agent) throw new Error('The main Session is not running; open it once before starting a team')
+    const directory = resolve(requestedDirectory ?? (settings.executor.teamDirectory || join(this.host.stateDir, 'team')))
+    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    if (!statSync(directory).isDirectory()) throw new Error(`Team directory is not a directory: ${directory}`)
     const at = new Date().toISOString()
     const id = `team-${key('team', task, agent.id, at)}`
     const profiles = settings.executor.profiles
     const team: Team = { id, title: (title.trim() || task.trim().split('\n')[0]!.slice(0, 80)) || 'Agent team', task, state: 'running',
-      created_at: at, updated_at: at, parent_session_id: agent.id, members: TEAM_ROLES.map(role => ({ role,
+      created_at: at, updated_at: at, parent_session_id: agent.id, directory, members: TEAM_ROLES.map(role => ({ role,
         profile: profiles[role] ? role : settings.executor.defaultProfile ?? null, state: 'idle' })) }
     this.save(team, true)
     const controller = new AbortController()
@@ -151,7 +156,7 @@ export class Teams {
     let activation: Activation
     try {
       activation = await subagents.startActivation({ provider: 'spawn', label: `${team.title} · ${TEAM_ROLE_LABELS[role]}`,
-        request: { prompt: [{ type: 'text', text }], parent, ...(profile?.preset ? { agentPreset: profile.preset } : { agentPreset: 'dsh-superagent-worker' }),
+        request: { prompt: [{ type: 'text', text }], parent, cwd: team.directory, ...(profile?.preset ? { agentPreset: profile.preset } : { agentPreset: 'dsh-superagent-worker' }),
           ...agentOptions ? { agentOptions } : {} }, signal, delivery: 'caller' })
     } catch (error) {
       member.state = 'failed'; member.error = String(error).slice(0, 1000); member.ended_at = new Date().toISOString(); this.save(team)

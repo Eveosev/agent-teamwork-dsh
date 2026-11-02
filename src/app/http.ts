@@ -149,7 +149,8 @@ const PromptsQuery = z.object({ revision: count.optional(), offset: count.defaul
 const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-9-]*$/)])
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
-const TeamCreateRequest = z.object({ task: z.string().trim().min(1).max(8000), title: z.string().trim().max(120).optional() }).strict()
+const TeamCreateRequest = z.object({ task: z.string().trim().min(1).max(8000), title: z.string().trim().max(120).optional(),
+  directory: z.string().trim().min(1).optional() }).strict()
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
@@ -194,7 +195,7 @@ function routes(runtime: HttpHost): Routes {
     'POST teams': async ({ body }) => {
       const request = TeamCreateRequest.parse(await body())
       const agent = await runtime.sessions.ensure(runtime.masterId, runtime.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
-      return { team: runtime.teams.create(request.task, agent, request.title ?? '') }
+      return { team: runtime.teams.create(request.task, agent, request.title ?? '', request.directory) }
     },
     'POST teams/:id/stop': ({ params }) => { team(params.id); return { stopped: runtime.teams.stop(params.id) } },
     'GET tickets': ({ query }) => {

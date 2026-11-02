@@ -128,6 +128,11 @@ export function ExecutionSettings() {
             <Input className="dt-mono" value={value.directory} placeholder={t('executionDirectoryEmpty')} spellCheck={false} pattern="/.*"
               onChange={event => edit({ directory: event.target.value })} />
           </Field>
+          <Field label={t('teamDirectory')} hint={t('teamDirectoryHint')} note={value.teamDirectory ? undefined
+            : t('teamDirectoryDefault', { root: environment.root })}>
+            <Input className="dt-mono" value={value.teamDirectory} placeholder={t('executionDirectoryEmpty')} spellCheck={false} pattern="/.*"
+              onChange={event => edit({ teamDirectory: event.target.value })} />
+          </Field>
           <Field label={t('prepareCommand')} hint={t('prepareCommandHint')}>
             <textarea ref={prepare} className="dt-textarea dt-mono" rows={3} maxLength={LIMITS.prepareCommand} spellCheck={false}
               placeholder={t('prepareCommandEmpty')} value={value.prepare}

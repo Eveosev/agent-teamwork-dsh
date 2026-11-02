@@ -109,6 +109,7 @@ export const ExecutorConfigSchema = z.object({
   defaultProfile: z.string().trim().min(1).optional(),
   maxWorkers: z.number().int().min(LIMITS.maxWorkers.min).max(LIMITS.maxWorkers.max).default(3),
   directory: z.string().trim().refine(path => path === '' || path.startsWith('/'), 'An absolute path, or empty for <stateDir>/work').default(''),
+  teamDirectory: z.string().trim().refine(path => path === '' || path.startsWith('/'), 'An absolute path, or empty for <stateDir>/team').default(''),
   prepare: z.string().max(LIMITS.prepareCommand).default(''),
   blockedCommands: z.array(CommandNameSchema).default([]),
 }).strict().refine(config => config.defaultProfile === undefined || Object.hasOwn(config.profiles, config.defaultProfile),

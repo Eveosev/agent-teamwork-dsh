@@ -8,9 +8,12 @@ In the DSH main Session:
 
 ```text
 /team Add a health endpoint and a test for it
+/team --dir /Users/me/projects/agent-teamwork Add a health endpoint and a test for it
 /team status
 /team stop team-<id>
 ```
+
+The team works in the **Team working directory** from Execution settings, or `--dir <path>` for one run. The default is `<stateDir>/team`; set the setting to the target repository checkout (for example `/Users/me/Vibe/agent-teamwork`) before starting a team that should edit that repository.
 
 The command does not create a Ticket and does not go through Eval or Policy: it is a direct human command. It is refused while processing is paused, and at most three teams run at once. A team can also be started from the **Team** tab in the panel.
 

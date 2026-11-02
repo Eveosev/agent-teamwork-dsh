@@ -124,7 +124,7 @@ export class Runtime extends Service implements SourceHost {
         lifetime: this.lifetime,
         closing: () => this.closing(), environment,
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
-      this.teams = new Teams({ context: ctx, store, masterId, settings: () => store.settings(), logger: ctx.logger })
+      this.teams = new Teams({ context: ctx, store, masterId, stateDir: machine.stateDir, settings: () => store.settings(), logger: ctx.logger })
       this.teams.recover()
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
       this.settings = new Settings({ store, sources, engine: { policyChanged }, health: board, context: ctx, lifetime: this.lifetime, sessions,
@@ -228,13 +228,15 @@ export class Runtime extends Service implements SourceHost {
         handler: (invocation: { agent: Agent; rawInput: string }) => { kind: 'success' | 'error'; text?: string } }): () => void } | undefined
       if (!commands) return
       this.disposers.push(commands.register({ name: 'team', description: 'Start a six-role agent team, or manage running teams',
-        input: { hint: '<task> | status | stop <team-id>' }, handler: ({ agent, rawInput }) => {
+        input: { hint: '[--dir <path>] <task> | status | stop <team-id>' }, handler: ({ agent, rawInput }) => {
           const input = rawInput.trim()
           if (!input) return { kind: 'error', text: 'Usage: /team <task>, /team status, or /team stop <team-id>' }
           if (input === 'status') return { kind: 'success', text: this.teams.list().map(team => `${team.id} [${team.state}] ${team.title}`).join('\n') || 'No teams yet' }
           if (input.startsWith('stop ')) { const id = input.slice(5).trim(); return this.teams.stop(id)
             ? { kind: 'success', text: `Stopping ${id}` } : { kind: 'error', text: `No running team ${id}` } }
-          try { const team = this.teams.create(input, agent); return { kind: 'success', text: `Team ${team.id} started: ${team.title}` } }
+          const directory = /^--dir\s+(\S+)\s+([\s\S]+)$/.exec(input)
+          const task = directory ? directory[2]!.trim() : input
+          try { const team = this.teams.create(task, agent, '', directory?.[1]); return { kind: 'success', text: `Team ${team.id} started in ${team.directory}: ${team.title}` } }
           catch (error) { return { kind: 'error', text: String(error) } }
         } }))
     })
