@@ -75,5 +75,6 @@ Send one message, under 300 words: what will be installed, the accounts and CLIs
 
 - The panel URL, and that the **Superagent** entry in the sidebar is where to look.
 - How to try it: from an account on the allowed list, comment `@<agent login> <request>` on an issue in the repository. A Ticket appears on the overview within about a minute.
+- Optional six-role team: set **Execution → Team working directory** to the target checkout, optionally apply `examples/team-profiles.json`, then send `/team <task>` in a chat and follow it in the **Team** tab.
 - Three rules for the operator, from the Responsibility section of `docs/000-philosophy.md`: start narrow, tune for less noise, own what the agent says.
 - Where to read more: the numbered documents in `docs/`, in order.

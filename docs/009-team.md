@@ -57,7 +57,7 @@ POST /orchestrator/api/teams/:id/stop        -> { stopped: boolean }
 
 ## Model route
 
-The team uses DSH providers configured on the profile, not a separate gateway client. The example `examples/profile.agent-teamwork.cordis.patch.yml` declares `llm-center` (OpenAI-compatible) and `anthropic-gateway` (Anthropic Messages). DSH's Anthropic adapter sends `x-api-key`; if `https://llm-center.modelbest.co` requires `Authorization: Bearer $ANTHROPIC_AUTH_TOKEN`, put a small proxy in front that adds that header, or route Claude through an OpenAI-compatible endpoint. The exact model ids (`claude-opus-5-5`, `deepseek-v4.1-flash-mb`) must match what the provider exposes; drop a `[1m]` suffix if the provider does not list it.
+The team uses DSH providers configured on the profile, not a separate gateway client. The example `examples/profile.agent-teamwork.cordis.patch.yml` declares `llm-center` (OpenAI-compatible) and `anthropic-gateway` (Anthropic Messages). DSH's Anthropic adapter sends `x-api-key`; the gateway also accepts `Authorization: Bearer $ANTHROPIC_AUTH_TOKEN` and both headers together (verified with `pnpm spike:gateway`), so either adapter style works. The exact model ids (`claude-opus-5-5`, `deepseek-v4.1-flash-mb`) must match what the provider exposes; drop a `[1m]` suffix if the provider does not list it.
 
 ## Limits
 

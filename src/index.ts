@@ -15,10 +15,14 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
   // serving this entry while dsh-superagent restarts and rereads it only on a configuration write, so trigger `describe()`
   // after restart to keep open configuration forms editable without a page reload.
   // TODO: drop the read once DSH's settings service rereads an entry whose plugin becomes active again.
+  let runtime: Runtime
   const restart = (): void => {
-    ctx.fiber.restart().then(() => { ctx.get('settings')?.describe() }).catch((error: unknown) => { ctx.logger.error('dsh-superagent restart failed: %s', String(error)) })
+    // Stop the old Runtime before the fiber remounts: its prompt sections, tools and skills live on agents that outlive
+    // this plugin scope, so releasing them first keeps a restart from registering a second prompt section.
+    void runtime.stop().then(() => ctx.fiber.restart()).then(() => { ctx.get('settings')?.describe() })
+      .catch((error: unknown) => { ctx.logger.error('dsh-superagent restart failed: %s', String(error)) })
   }
-  const runtime = new Runtime(ctx, machine, restart)
+  runtime = new Runtime(ctx, machine, restart)
   ctx.effect(() => async () => { await runtime.stop() })
   await runtime.ready
   ctx.logger.info(runtime.configured() ? 'dsh-superagent ready; the Superagent sidebar entry opens the management panel' : `dsh-superagent is waiting for setup: ${runtime.setupProblem?.detail ?? ''}`)

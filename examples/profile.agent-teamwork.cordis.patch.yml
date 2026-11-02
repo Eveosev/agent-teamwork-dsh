@@ -21,9 +21,8 @@
           - id: deepseek-v4.1-flash-mb
             name: deepseek-v4.1-flash
             input: [text, image]
-      # Anthropic Messages gateway. DSH's adapter sends x-api-key; if the gateway
-      # requires `Authorization: Bearer $ANTHROPIC_AUTH_TOKEN`, front it with a
-      # tiny proxy that adds that header, or use an OpenAI-compatible route.
+      # Anthropic Messages gateway. DSH's adapter sends x-api-key; the gateway
+      # accepts that, Bearer, or both, so no proxy is needed.
       anthropic-gateway:
         apiKeyEnv: ANTHROPIC_AUTH_TOKEN
         api: anthropic-messages
