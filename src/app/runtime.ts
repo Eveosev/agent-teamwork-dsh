@@ -41,6 +41,7 @@ import { Setup } from './setup.ts'
 import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
+import { Teams } from './teams.ts'
 import { Settings } from './settings.ts'
 import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
@@ -64,6 +65,7 @@ export class Runtime extends Service implements SourceHost {
   readonly sources: SourceRegistry
   readonly commands: Commands
   readonly sessions: Sessions
+  readonly teams: Teams
   readonly settings: Settings
   readonly executor: DshExecutor
   readonly assessor: MasterAssessor
@@ -122,6 +124,7 @@ export class Runtime extends Service implements SourceHost {
         lifetime: this.lifetime,
         closing: () => this.closing(), environment,
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
+      this.teams = new Teams({ context: ctx, store, masterId, settings: () => store.settings(), logger: ctx.logger })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
       this.settings = new Settings({ store, sources, engine: { policyChanged }, health: board, context: ctx, lifetime: this.lifetime, sessions,
         sourceHost: this, setup, requestPass: () => { this.passes.request() } })
@@ -208,6 +211,7 @@ export class Runtime extends Service implements SourceHost {
     this.sessions.install()
     this.executor.install()
     await this.sessions.ensure(this.masterId, this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
+    this.registerTeamCommand()
     for (const id of this.settings.syncable()) await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
     // If stop() was called while awaiting setup, session creation, or policy sync, do not start background loops.
     if (this.closing()) return
@@ -216,10 +220,28 @@ export class Runtime extends Service implements SourceHost {
     this.effects.start()
     this.runtimeHealth.set({ state: 'ready', detail: 'Orchestrator is ready', at: now() })
   }
+  /** Registers `/team`: start, list or stop a six-role team. Registration is optional so headless DSH profiles still start. */
+  private registerTeamCommand(): void {
+    this.ctx.inject(['commands'], child => {
+      const commands = child.get('commands') as { register(definition: { name: string; description: string; input?: { hint: string };
+        handler: (invocation: { agent: Agent; rawInput: string }) => { kind: 'success' | 'error'; text?: string } }): () => void } | undefined
+      if (!commands) return
+      this.disposers.push(commands.register({ name: 'team', description: 'Start a six-role agent team, or manage running teams',
+        input: { hint: '<task> | status | stop <team-id>' }, handler: ({ agent, rawInput }) => {
+          const input = rawInput.trim()
+          if (!input) return { kind: 'error', text: 'Usage: /team <task>, /team status, or /team stop <team-id>' }
+          if (input === 'status') return { kind: 'success', text: this.teams.list().map(team => `${team.id} [${team.state}] ${team.title}`).join('\n') || 'No teams yet' }
+          if (input.startsWith('stop ')) { const id = input.slice(5).trim(); return this.teams.stop(id)
+            ? { kind: 'success', text: `Stopping ${id}` } : { kind: 'error', text: `No running team ${id}` } }
+          try { const team = this.teams.create(input, agent); return { kind: 'success', text: `Team ${team.id} started: ${team.title}` } }
+          catch (error) { return { kind: 'error', text: String(error) } }
+        } }))
+    })
+  }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
-    return { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks,
+    const { store, sources, prompts, sessions, teams, settings, engine, executor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
+    return { store, sources, prompts, sessions, teams, settings, engine, executor, health, machine, masterId, ready, sourceLinks,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),

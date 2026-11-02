@@ -17,6 +17,7 @@ import type { DshExecutor } from '../executor/dsh.ts'
 import type { Health } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import type { Sessions } from './sessions.ts'
+import type { Teams } from './teams.ts'
 import type { Store } from './store.ts'
 import type { TextCache } from './cache.ts'
 import type { LinkTarget, ViewHost } from './views/records.ts'
@@ -35,6 +36,7 @@ export interface HttpHost {
   readonly sources: SourceRegistry
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery'>
+  readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'stop' | 'activeCount'>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount'>
@@ -147,10 +149,12 @@ const PromptsQuery = z.object({ revision: count.optional(), offset: count.defaul
 const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-9-]*$/)])
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
+const TeamCreateRequest = z.object({ task: z.string().trim().min(1).max(8000), title: z.string().trim().max(120).optional() }).strict()
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
   const ticket = (id: string) => { if (!store.tickets.get(id)) throw new RouteError(404, 'Ticket not found'); return id }
+  const team = (id: string) => { const found = runtime.teams.get(id); if (!found) throw new RouteError(404, 'Team not found'); return found }
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
     'GET state': () => stateView(runtime),
@@ -185,6 +189,13 @@ function routes(runtime: HttpHost): Routes {
       return decisionList(views(runtime), kind.split(',').filter(Boolean), offset, limit, since)
     },
     'POST decisions/:id/dismiss': ({ params }) => { runtime.engine.dismiss(params.id); return { dismissed: true } },
+    'GET teams': () => ({ items: runtime.teams.list(), active: runtime.teams.activeCount }),
+    'GET teams/:id': ({ params }) => team(params.id),
+    'POST teams': async ({ body }) => {
+      const request = TeamCreateRequest.parse(await body())
+      return { team: runtime.teams.create(request.task, undefined, request.title ?? '') }
+    },
+    'POST teams/:id/stop': ({ params }) => { team(params.id); return { stopped: runtime.teams.stop(params.id) } },
     'GET tickets': ({ query }) => {
       const { state, offset, limit } = TicketsQuery.parse(query)
       return ticketList(views(runtime), state, offset, limit)

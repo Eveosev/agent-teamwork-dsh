@@ -324,6 +324,11 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     ({ items: query.kind === 'ignore' ? [] : [acceptDecision()], next_offset: null }) },
   'POST decisions/:id/dismiss': { answer: ({ params }) => params.id === 'u1' ? { dismissed: true } : refuse(404,
     'Unavailable Eval not found') },
+  'GET teams': { answer: () => ({ items: [], active: 0 }) },
+  'GET teams/:id': { answer: ({ params }) => refuse(404, `No team ${params.id}`) },
+  'POST teams': { body: true, answer: ({ body }) => ({ team: { id: 'team-test', title: body.task, task: body.task, state: 'running' as const,
+    created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z', parent_session_id: 'master', members: [] } }) },
+  'POST teams/:id/stop': { answer: () => ({ stopped: true }) },
   'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
     : 'open']) },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },
