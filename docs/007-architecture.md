@@ -389,6 +389,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/overview.tsx` | The overview |
 | `src/client/source.tsx`, `trigger.tsx`, `eval.tsx`, `execution.tsx` | One file per stage: its status, and its settings where it has some |
 | `src/client/thread.tsx`, `ticket.tsx` | The record pages: a Thread with its timeline, and a Ticket with its authorization, Inputs and Assignments |
+| `src/client/team.tsx` | The Team tab: the list and start form, and a team's six member cards, member Sessions and final summary |
 | `src/client/settings.tsx` | The Settings tab: the group navigation and the group on screen |
 | `src/client/settings-kit.tsx` | The building blocks of settings blocks: the settings the stage groups share, `useBlockDraft`, the fields, among them a Source kind's, and the history of saves |
 | `src/client/prompts.tsx` | The Prompts settings: the page owns the view it read and its editor the draft, and the Edit, Full prompt and History tabs render from them; a built-in part's editor shows a changed default and keeps or drops the override |
@@ -416,6 +417,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/worker-profiles.spec.ts` | Named worker profiles: parsing, the default, selection on acceptance, refusal of an unknown id, and the profile on Execution metadata and ticket cards |
 | `tests/teams.spec.ts` | The six-role team runtime: role order, per-profile models, pause refusal, stop, evidence and the final summary |
 | `tests/team-command.spec.ts` | `/team` registration on the real Runtime harness, a completed team through the panel API, status, pause refusal and stop |
+| `tests/panel-team.spec.tsx` | The Team tab: list and member dots, start form, detail cards, output collapse, session open, stop, summary, empty and missing states |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |

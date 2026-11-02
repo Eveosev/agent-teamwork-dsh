@@ -8,6 +8,7 @@ import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-
 import type { Api, ApiResponse, RouteParams } from '../../src/app/api.ts'
 import { SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInPart, builtInParts, composePrompt, composeSkill, defaultPrompts,
   environmentSection, policySection, promptParts } from '../../src/app/prompts.ts'
+import type { Team, TeamMember, TeamSummary } from '../../src/app/teams.ts'
 import type { DroppedReply, HistoryView, Problem, PromptsView, SetupView, SourceStatusRow, SourceView, StateView, ThreadPageView,
   ThreadRow, TicketPageView,
   TicketRow, TicketStage,
@@ -90,6 +91,7 @@ export interface PanelServer {
   settings: Settings; revisions: Record<string, number>
   prompts: PromptsView
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
+  teams: { items: TeamSummary[]; details: Record<string, Team> }
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'>; history: HistoryView
@@ -231,6 +233,35 @@ function threadPage(key: string, { before, around }: { before?: string; around?:
   return { ...base, earlier: 'cursor-1', timeline: [trigger('e3', '2026-09-23T00:00:00Z', { disposition: { fanout: ['t1'] } }),
     trigger('e4', '2026-09-23T00:01:00Z', { disposition: { filtered: { code: 'not_a_member' } } })] }
 }
+const TEAM_ROLE_NAMES = ['lead', 'researcher', 'developer', 'tester', 'reviewer', 'ops'] as const
+const teamSummary = (team: Team): TeamSummary => ({ id: team.id, title: team.title, state: team.state, created_at: team.created_at,
+  updated_at: team.updated_at, members: team.members.map(({ role, state }) => ({ role, state })), ...team.summary ? { summary: team.summary } : {} })
+const teamMember = (role: TeamMember['role'], state: TeamMember['state'], extra: Partial<TeamMember> = {}): TeamMember =>
+  ({ role, profile: null, state, ...extra })
+function teamFixtures(): PanelServer['teams'] {
+  const now = Date.now()
+  const at = (ago: number) => new Date(now - ago).toISOString()
+  const lead = `${'Lead plan: inspect the login redirect, fix it, then verify the tests.\n'.repeat(30)}END-OF-LEAD-OUTPUT`
+  const running: Team = {
+    id: 'team-1', title: '修复登录页回归', task: '修复登录页回归，并补充测试。', state: 'running', created_at: at(600_000),
+    updated_at: at(30_000), parent_session_id: 'master', directory: '/tmp/team', members: [
+      teamMember('lead', 'done', { session_id: 'team-lead', output: lead, started_at: at(600_000), ended_at: at(480_000) }),
+      teamMember('researcher', 'running', { profile: 'researcher', session_id: 'team-researcher', started_at: at(240_000) }),
+      teamMember('developer', 'done', { profile: 'developer', session_id: 'team-developer', output: 'Changed src/login.tsx',
+        started_at: at(240_000), ended_at: at(60_000) }),
+      teamMember('tester', 'failed', { session_id: 'team-tester', error: 'Tests failed: 1 failure', started_at: at(60_000),
+        ended_at: at(30_000) }),
+      teamMember('reviewer', 'idle'),
+      teamMember('ops', 'idle'),
+    ],
+  }
+  const done: Team = {
+    id: 'team-2', title: '发布检查', task: '检查发布状态。', state: 'done', created_at: at(1_800_000), updated_at: at(1_200_000),
+    parent_session_id: 'master', directory: '/tmp/team', summary: 'All checks passed. **No action** is needed.', members: TEAM_ROLE_NAMES.map(role =>
+      teamMember(role, 'done', { started_at: at(1_800_000), ended_at: at(1_200_000) })),
+  }
+  return { items: [teamSummary(running), teamSummary(done)], details: { [running.id]: running, [done.id]: done } }
+}
 function initial(): PanelServer {
   const settings = SettingsSchema.parse({
     policy: { sources: { feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }], syncChat: 'oc_team' },
@@ -257,7 +288,7 @@ function initial(): PanelServer {
       defaults: defaultPrompts(), parts: Object.entries(builtInParts()).map(([key, part]) => ({ key, ...part, base: builtInBase(part.text) })),
       defaultChanged: [], revisions: [{ ...defaults, changed: [] }], sessions: [], notificationPending: false, next_offset: null },
     tickets: { open: [ticketSummary()], ended: [ended] }, ticketDetails: { t1: ticketDetail() },
-    threads: [threadSummary()], threadPages: threadPage,
+    teams: teamFixtures(), threads: [threadSummary()], threadPages: threadPage,
     person: [ticketSummary({ attention: { id: 'q1', question: '需要确认按钮颜色' }, note: { text: '需要确认按钮颜色', error: false }, reply },
       { stage: 'person', action: 'answer' }),
       ticketSummary({ id: 't4', title: '截图工具', actions: { retry: true, stop: true }, sessionId: 'worker-t4',
@@ -324,11 +355,31 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     ({ items: query.kind === 'ignore' ? [] : [acceptDecision()], next_offset: null }) },
   'POST decisions/:id/dismiss': { answer: ({ params }) => params.id === 'u1' ? { dismissed: true } : refuse(404,
     'Unavailable Eval not found') },
-  'GET teams': { answer: () => ({ items: [], active: 0 }) },
-  'GET teams/:id': { answer: ({ params }) => refuse(404, `No team ${params.id}`) },
-  'POST teams': { body: true, answer: ({ body }) => ({ team: { id: 'team-test', title: body.task, task: body.task, state: 'running' as const,
-    created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z', parent_session_id: 'master', directory: '/tmp', members: [] } }) },
-  'POST teams/:id/stop': { answer: () => ({ stopped: true }) },
+  'GET teams': { answer: () => ({ items: server.teams.items,
+    active: server.teams.items.filter(team => team.state === 'running').length }) },
+  'GET teams/:id': { answer: ({ params }) => server.teams.details[params.id] ?? refuse(404, `No team ${params.id}`) },
+  'POST teams': { body: true, answer: ({ body }) => {
+    const at = new Date().toISOString()
+    const team: Team = { id: `team-${server.teams.items.length + 1}`,
+      title: body.title?.trim() || body.task.trim().split('\n')[0]!.slice(0, 80) || 'Agent team', task: body.task,
+      state: 'running', created_at: at, updated_at: at, parent_session_id: 'master', directory: body.directory ?? '/tmp/team',
+      members: TEAM_ROLE_NAMES.map(role => teamMember(role, 'idle')) }
+    server.teams.items = [teamSummary(team), ...server.teams.items]
+    server.teams.details[team.id] = team
+    return { team }
+  } },
+  'POST teams/:id/stop': { answer: ({ params }) => {
+    const team = server.teams.details[params.id]
+    if (!team) return refuse(404, `No team ${params.id}`)
+    const stopped = team.state === 'running'
+    if (stopped) {
+      team.state = 'stopped'; team.updated_at = new Date().toISOString()
+      for (const member of team.members) if (member.state === 'running') { member.state = 'stopped'; member.ended_at = team.updated_at }
+      const summary = server.teams.items.find(item => item.id === team.id)
+      if (summary) Object.assign(summary, teamSummary(team))
+    }
+    return { stopped }
+  } },
   'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
     : 'open']) },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },

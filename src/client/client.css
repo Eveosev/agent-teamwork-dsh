@@ -46,6 +46,8 @@
 .dt-row-buttons { position: relative; z-index: 1; gap: 8px; margin-top: 4px; }
 .dt-row-actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; font-size: 13px; line-height: 20px; }
 .dt-dot { flex: none; margin-top: 5px; }
+.dt-team-dots { display: inline-flex; align-items: center; gap: 6px; }
+.dt-team-dots .dt-dot { margin-top: 0; }
 .dt-inline-link { position: relative; z-index: 1; color: var(--dsw-alias-link); text-decoration: none; }
 .dt-inline-link:hover { text-decoration: underline; }
 .dt-textlink { padding: 0; border: 0; background: none; font: inherit; color: var(--dsw-alias-link); cursor: pointer; text-align: left; }
