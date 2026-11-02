@@ -86,6 +86,18 @@ The fourth command creates `~/.dsh/profiles/superagent` from the DeepSeek Harnes
 
 Run the profile-creation command only for a new installation. If the profile already exists, that command replaces it and deletes its `cordis.patch.yml`, including machine configuration. Do not use it for upgrades.
 
+### Desktop app install
+
+The desktop app's **Plugins** page installs the bundle but does not ask for machine configuration, and `dsh-superagent` refuses to start without `stateDir`. After adding the bundle there, add this entry to the profile's `cordis.patch.yml` (normally `~/.dsh/profiles/desktop/cordis.patch.yml`), then reload or restart the app:
+
+```yaml
+- id: dsh-superagent
+  config:
+    stateDir: /Users/<you>/.dsh/state/agent-teamwork
+```
+
+Without it the sidebar entry appears, but its page reports that dsh-superagent is not answering, because the Host plugin never passes configuration validation.
+
 ## Machine configuration
 
 Copy [examples/profile.cordis.patch.yml](../examples/profile.cordis.patch.yml) to `~/.dsh/profiles/superagent/cordis.patch.yml`, replacing that file, and replace every `<placeholder>`. For Feishu, also enable the `dsh-superagent-feishu` entry there. The `webserver` entry sets the panel's port.
@@ -266,6 +278,7 @@ Setup problems appear on the overview with a link to the fix, in the panel's lan
 | `status` exits 2 | A part reports an error, which a restart does not fix: `errors` names each part, as listed under Management API, with its detail; each part clears its own entry once it works again |
 | `status` exits 3 | Setup waits: `setup` says what is missing, and the overview links to the setting that fixes it |
 | `status` exits 1 | The service does not run, runs twice, does not answer, or its runtime reports an error; the output and the newest log say which |
+| The panel says dsh-superagent is not answering after installing from the desktop **Plugins** page | The bundle has no `stateDir`; add the `dsh-superagent` entry from Desktop app install above, then reload or restart the app |
 | `… timed out after 90 s`, `… was stopped by …`, `… exited with code …` or `… could not run: …` | A CLI failed without printing why; run the named program by hand as the operator's user to see its own message |
 | The panel says dsh-superagent is not answering | It is restarting, or did not start because of its configuration; the DeepSeek Harness log names the cause |
 | `dsh-superagent configuration has keys it does not use` (log) | Remove the named keys; the message says where each value lives now |
