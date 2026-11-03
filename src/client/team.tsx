@@ -13,6 +13,8 @@ type TeamMember = Team['members'][number]
 type TeamState = Team['state']
 type MemberState = TeamMember['state']
 type TeamRole = TeamMember['role']
+type TeamOutcome = NonNullable<Team['outcome']>
+type TeamUsage = NonNullable<Team['usage']>
 
 const TEAM_ROLES = ['lead', 'researcher', 'developer', 'tester', 'reviewer', 'ops'] as const satisfies readonly TeamRole[]
 
@@ -25,7 +27,31 @@ const teamTone = (state: TeamState): TagTone => state === 'running' ? 'info' : s
 const roleLabel = (t: T, role: TeamRole): string => valueLabel(t, 'teamRole', role)
 const memberLabel = (t: T, state: MemberState): string => valueLabel(t, 'teamMemberState', state)
 const teamStateLabel = (t: T, state: TeamState): string => valueLabel(t, 'teamState', state)
+const outcomeLabel = (t: T, outcome: TeamOutcome): string => outcome === 'achieved' ? t('teamOutcome.achieved')
+  : outcome === 'not_achieved' ? t('teamOutcome.not_achieved') : t('teamOutcome.unverified')
+const outcomeTone = (outcome: TeamOutcome): TagTone => outcome === 'achieved' ? 'success'
+  : outcome === 'not_achieved' ? 'danger' : 'warning'
+/** Older records finished before outcome markers existed; without evidence they are unverified, never implicitly successful. */
+const shownOutcome = (state: TeamState, outcome: TeamOutcome | undefined): TeamOutcome | undefined =>
+  outcome ?? (state === 'done' ? 'unverified' : undefined)
+function OutcomeTag({ state, outcome }: { state: TeamState; outcome?: TeamOutcome }) {
+  const { t } = usePanel()
+  const shown = shownOutcome(state, outcome)
+  return shown ? <Tag tone={outcomeTone(shown)}>{outcomeLabel(t, shown)}</Tag> : null
+}
 const doneCount = (members: readonly { state: MemberState }[]): number => members.filter(member => member.state === 'done').length
+const tokenCount = (value: number): string => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+
+/** One role's or one team's input/output/cached token totals. */
+function TokenUsageLine({ usage }: { usage: TeamUsage }) {
+  const { t } = usePanel()
+  return <span className="dt-token-usage" title={`${t('teamTokenInput')} ${usage.input}${t('listSeparator')}${t('teamTokenOutput')} ${usage.output}${t('listSeparator')}${t('teamTokenCached')} ${usage.cached}`}>
+    <span className="dt-token-usage-label">{t('teamTokens')}</span>
+    <span>{t('teamTokenInput')} <strong>{tokenCount(usage.input)}</strong></span>
+    <span>{t('teamTokenOutput')} <strong>{tokenCount(usage.output)}</strong></span>
+    <span>{t('teamTokenCached')} <strong>{tokenCount(usage.cached)}</strong></span>
+  </span>
+}
 
 /** Format a start/end span with localized units; a missing end means it is still running. */
 function durationText(t: T, from: string, to: string | undefined): string {
@@ -86,9 +112,16 @@ function MemberCard({ team, role }: { team: Team; role: TeamRole }) {
         <div className="dt-row-meta"><span>{t('teamProfile')}{t('labelSeparator')}<span
           className="dt-mono">{member?.profile ?? t('teamDefaultProfile')}</span></span></div>
       </div>
-      <Tag tone={memberTone(state)}>{label}</Tag>
+      <span className="dt-tag-group">
+        <Tag tone={memberTone(state)}>{label}</Tag>
+        {member?.verdict && <Tag tone={member.verdict === 'pass' ? 'success' : 'danger'}>
+          {member.verdict === 'pass' ? t('teamVerdict.pass') : t('teamVerdict.fail')}</Tag>}
+      </span>
     </div>
-    <div className="dt-row-meta"><LabelValue label={t('teamElapsed')} value={elapsed} /></div>
+    <div className="dt-row-meta"><LabelValue label={t('teamElapsed')} value={elapsed} />
+      {member?.round && member.round > 1 && <LabelValue label={t('teamRounds')} value={member.round} />}
+      {member?.usage && <TokenUsageLine usage={member.usage} />}
+    </div>
     {member?.session_id && <div className="dt-actions">
       <span className="dt-mono">{member.session_id}</span>
       <SessionButton variant="outline" sessionId={member.session_id} />
@@ -113,8 +146,11 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
         onClick={() => navigate({ page: 'team', id: team.id })}>{team.title}</button></div>
       <div className="dt-row-meta">
         <Tag tone={teamTone(team.state)}>{teamStateLabel(t, team.state)}</Tag>
+        <OutcomeTag state={team.state} outcome={team.outcome} />
         <LabelValue label={t('teamProgress')} value={`${doneCount(team.members)}/${TEAM_ROLES.length}`} />
         <LabelValue label={t('teamCreated')} value={<When at={team.created_at} />} />
+        {team.rounds && <LabelValue label={t('teamRounds')} value={team.rounds} />}
+        {team.usage && <TokenUsageLine usage={team.usage} />}
         <span className="dt-team-dots">{TEAM_ROLES.map(role => {
           const state = team.members.find(member => member.role === role)?.state ?? 'idle'
           return <Dot key={role} state={stateDot(state)} label={`${roleLabel(t, role)} · ${memberLabel(t, state)}`} />
@@ -207,10 +243,13 @@ export function TeamPage({ id }: { id: string }) {
     {error && <LoadState error={error} loading={false} />}
     <div className="dt-row-meta dt-status-line">
       <Tag tone={teamTone(data.state)}>{teamStateLabel(t, data.state)}</Tag>
+      <OutcomeTag state={data.state} outcome={data.outcome} />
       <LabelValue label={t('teamProgress')} value={`${doneCount(data.members)}/${TEAM_ROLES.length}`} />
       <LabelValue label={t('teamCreated')} value={<When at={data.created_at} />} />
       <LabelValue label={running ? t('teamRunningFor') : t('teamDuration')}
         value={durationText(t, data.created_at, end)} />
+      {data.rounds && <LabelValue label={t('teamRounds')} value={data.rounds} />}
+      {data.usage && <TokenUsageLine usage={data.usage} />}
       <LabelValue label={t('teamDirectory')} value={<span className="dt-mono">{data.directory}</span>} />
       {running && <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
         message={t('teamStopConfirm', { title: data.title })}
@@ -223,6 +262,8 @@ export function TeamPage({ id }: { id: string }) {
     <Section title={t('teamMembers')} count={TEAM_ROLES.length}>
       <div className="dt-grid3">{TEAM_ROLES.map(role => <MemberCard key={role} team={data} role={role} />)}</div>
     </Section>
-    {data.summary && <Section title={t('teamSummary')}><TeamSummaryCard text={data.summary} /></Section>}
+    {data.summary && <Section title={t('teamSummary')} badge={<OutcomeTag state={data.state} outcome={data.outcome} />}>
+      <TeamSummaryCard text={data.summary} />
+    </Section>}
   </>
 }

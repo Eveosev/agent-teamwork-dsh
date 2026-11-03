@@ -57,6 +57,8 @@ Open the panel's **Execution settings** and edit **Worker profiles** as JSON, th
 }
 ```
 
+The built-in team instructions require the tester and reviewer to end with `VERDICT: PASS` or `VERDICT: FAIL`; a profile's `instructions` are appended, so they can add project-specific acceptance rules without removing that marker. The reviewer also has to capture a real screenshot when a product or feature design can be verified visually.
+
 `tools` is an allowlist of the Executor's work tools (`read`, `write`, `edit`, `read_image`, `glob`, `grep`, `bash`, `pwsh`, `job_output`, `job_list`, `job_kill`, `web_search`, `web_fetch`, `skill`, `todo_write`, `subagent`, `list_subagent_models`, `send_message`, `list_agents`, `interrupt_agent`). Omit it for every work tool. The Executor still removes tools the Agent preset does not provide.
 
 `preset` selects another DSH Agent preset for this profile. Leave it out to use the bundle's worker preset. A custom preset must provide the tools the profile names; the panel cannot create presets.

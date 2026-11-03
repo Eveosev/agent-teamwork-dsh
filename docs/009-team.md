@@ -37,19 +37,29 @@ The panel's Team form and `POST /teams` still accept text only; image input is c
 | `lead` | Plans the work, then synthesizes the final summary | `deepseek-v4.1-flash-mb` |
 | `researcher` | Reads the repository and external sources; returns facts and links | `glm-5.3-mb` |
 | `developer` | Implements the task in the working directory | `glm-5.3-mb` |
-| `tester` | Adds/adjusts tests, runs them, reports commands and results | `deepseek-v4.1-flash-mb` |
-| `reviewer` | Reviews the implementation; captures screenshot evidence for visually verifiable product/feature design; read-only | `deepseek-v4.1-flash-mb` |
+| `tester` | Adds/adjusts tests, runs them, reports commands and results, and ends with a PASS/FAIL verdict | `deepseek-v4.1-flash-mb` |
+| `reviewer` | Reviews the implementation, captures screenshot evidence for visually verifiable product/feature design, and ends with a PASS/FAIL verdict; read-only | `deepseek-v4.1-flash-mb` |
 | `ops` | Inspects CI and deployment state; read-only | `glm-5.3-mb` |
 
-The runtime runs: lead plan → researcher and developer in parallel → tester and reviewer in parallel → ops → lead synthesis. Each role except the lead is started once; the lead runs twice with the same profile. A member failure is recorded as evidence and does not cancel the other roles.
+The runtime runs: lead plan → researcher and developer in parallel → tester and reviewer in parallel → ops → lead synthesis. If both verifiers return `VERDICT: PASS`, the team finishes in one round. If either returns `VERDICT: FAIL`, the lead writes concrete repair instructions, the developer applies them, and the tester and reviewer run again. This repeats for at most three rounds (one implementation plus two repairs); a team that still fails is marked `not_achieved`, so a person sees the unresolved result without having to drive each retry.
 
 When the deliverable is a product or feature design that can be verified visually, the reviewer must capture a real screenshot of the implemented result and cite its path in the review. A code-only review is not visual acceptance; if a screenshot cannot be captured, the reviewer says why and marks that check unverified.
+
+### Result and token usage
+
+Every completed team has an `outcome`, separate from its execution `state`:
+
+- `achieved`: both the tester and reviewer returned `VERDICT: PASS`.
+- `not_achieved`: verification still failed after the round limit, or a verifier failed to run.
+- `unverified`: a verdict was missing, so the team does not claim success. Older records without an outcome are shown as unverified.
+
+Each member records `input`, `output` and `cached` token counts summed over every model call it made, including repeated repair rounds; the team total is the sum of its members. `input` is uncached input, and `cached` is cache-read input. The counts come from DSH's `assistant/message` usage events for the child Session.
 
 The role's model, Agent preset and extra instructions come from the worker profile whose id equals the role name (`lead`, `researcher`, `developer`, `tester`, `reviewer`, `ops`). If that profile does not exist, the role uses `defaultProfile` or the executor model. See `docs/worker-profiles.md`.
 
 ## Evidence and lifecycle
 
-A Team record holds the task, title, timestamps, parent Session, each member's profile, state, child Session id, output and error, plus the lead's final summary. It is stored in the state directory and listed by the panel.
+A Team record holds the task, title, timestamps, parent Session, each member's profile, state, child Session id, output, error, verdict, round and token usage, plus the lead's final summary, outcome and round count. It is stored in the state directory and listed by the panel.
 
 - `running` until the synthesis ends; then `done`.
 - A member that fails records `failed` and its diagnostic; the team continues.
@@ -79,4 +89,5 @@ The team uses DSH providers configured on the profile, not a separate gateway cl
 - No automatic PR or Ticket: the team runs in its own Team working directory (`--dir` or Execution settings), not a per-team worktree. Use the Ticket path when you need worktree isolation, CI checks, review gates and Feishu/GitHub replies.
 - The worker preset gives every child the normal work tools. Role tool allowlists are enforced on Executor Sessions, not on team subagents; the team relies on role instructions plus the sandbox and the account. Do not give the team a more privileged account than the work needs.
 - A team is not persisted as a resumable graph. Restart recovery is deliberately conservative.
+- Automatic repair is limited to three rounds; it does not wait for a person and does not merge or publish anything.
 - Feishu and GitHub can trigger Tickets today; starting a team from an external trigger needs a bridge (for example a command handler or a future `team:` route), not part of v0.1.

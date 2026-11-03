@@ -13,6 +13,11 @@ export const TEAM_ROLES = ['lead', 'researcher', 'developer', 'tester', 'reviewe
 export type TeamRole = typeof TEAM_ROLES[number]
 export type TeamState = 'running' | 'done' | 'failed' | 'stopped'
 export type MemberState = 'idle' | 'running' | 'done' | 'failed' | 'stopped'
+/** Whether the team's acceptance criteria were met, independently of whether execution finished. */
+export type TeamOutcome = 'achieved' | 'not_achieved' | 'unverified'
+export type MemberVerdict = 'pass' | 'fail'
+/** Token counts summed over every model call a role made; cache reads are disjoint from uncached input. */
+export interface TeamUsage { input: number; output: number; cached: number }
 export const TEAM_ROLE_LABELS: Record<TeamRole, string> = { lead: 'Team lead', researcher: 'Researcher', developer: 'Developer',
   tester: 'Tester', reviewer: 'Reviewer', ops: 'Ops' }
 /** The built-in role instructions a profile can override with its own `instructions`. */
@@ -20,19 +25,20 @@ const ROLE_INSTRUCTIONS: Record<TeamRole, string> = {
   lead: 'You lead a six-person engineering team. Turn the task into a short plan with workstreams, acceptance criteria and risks. Do not edit files.',
   researcher: 'You research the repository and, when needed, the web. Return concise facts with file paths and links. Do not edit files.',
   developer: 'You implement the task in the working directory. Keep the change scoped, run the relevant checks, and report the changed files and commands.',
-  tester: 'You test the implementation. Add or adjust tests only where needed, run them, and report the exact commands and results. Do not change product code unless the task requires it.',
-  reviewer: 'You review the implementation against the task and the repository conventions. Do not edit source files. For a product or feature design whose result can be verified visually (UI, layout, interaction or rendered output), capture a real screenshot of the implemented result with the available browser or screenshot tooling, save it under the working directory, and include its absolute path as evidence. If a screenshot cannot be captured, say why and mark the visual acceptance check unverified. Report findings by severity with file and line references.',
+  tester: 'You test the implementation. Add or adjust tests only where needed, run them, and report the exact commands and results. Do not change product code unless the task requires it. End your report with one line exactly `VERDICT: PASS` or `VERDICT: FAIL`; use PASS only when every acceptance criterion is met and the checks pass, otherwise FAIL and list the blocking issues.',
+  reviewer: 'You review the implementation against the task and the repository conventions. Do not edit source files. For a product or feature design whose result can be verified visually (UI, layout, interaction or rendered output), capture a real screenshot of the implemented result with the available browser or screenshot tooling, save it under the working directory, and include its absolute path as evidence. If a screenshot cannot be captured, say why and mark the visual acceptance check unverified. End your report with one line exactly `VERDICT: PASS` or `VERDICT: FAIL`; use PASS only when every acceptance criterion is met, otherwise FAIL and list the blocking findings. Report findings by severity with file and line references.',
   ops: 'You inspect CI, logs and deployment state. Run read-only commands; do not edit the repository. Report failures and the command that showed them.',
 }
 
 /** One role's latest run in a team. */
 export interface TeamMember { role: TeamRole; profile: string | null; state: MemberState; session_id?: string; output?: string; error?: string
-  started_at?: string; ended_at?: string }
+  started_at?: string; ended_at?: string; round?: number; verdict?: MemberVerdict; usage?: TeamUsage }
 /** A durable team record, listed and inspected by the panel. */
 export interface Team { id: string; title: string; task: string; state: TeamState; created_at: string; updated_at: string
-  parent_session_id: string; directory: string; members: TeamMember[]; summary?: string; error?: string }
+  parent_session_id: string; directory: string; members: TeamMember[]; summary?: string; error?: string; outcome?: TeamOutcome
+  rounds?: number; usage?: TeamUsage }
 export interface TeamSummary { id: string; title: string; state: TeamState; created_at: string; updated_at: string
-  members: { role: TeamRole; state: MemberState }[]; summary?: string }
+  members: { role: TeamRole; state: MemberState }[]; summary?: string; outcome?: TeamOutcome; rounds?: number; usage?: TeamUsage }
 
 /** Structural subset of DSH's subagent service, kept local so the bundle does not depend on the package at build time. */
 interface Activation { childId: string; result: Promise<{ output: readonly { type: string; text?: string }[]; stopReason: string; diagnostic?: string }>
@@ -43,14 +49,37 @@ interface Subagents { startActivation(spec: { provider: string; label: string; r
 /** Structural subset of DSH's model catalog, used to keep image input from being silently dropped for text-only roles. */
 interface Llm { resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{ inputModalities?: readonly string[] }> }
 interface ModelRoute { provider: string; model: string }
+/** A child Session's assistant-message usage, observed from DSH's session event stream. */
+interface UsageEvent { type: string; usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } }
+interface UsageSession { id: string }
+interface SessionEvents { snapshotEvents(): readonly UsageEvent[] }
+interface SessionLookup { get(id: string): SessionEvents | undefined }
 
 export interface TeamsHost { context: Context; store: Pick<Store, 'get' | 'set' | 'atomic'>; masterId: string; stateDir: string; settings(): Settings
   logger: { warn(message: string): void } }
 const MAX_ACTIVE_TEAMS = 3
+/** At most this many implementation/verification rounds, including the first; later rounds are lead-directed repairs. */
+const MAX_ROUNDS = 3
 const OUTPUT_LIMIT = 24_000
 const clip = (text: string): string => text.length <= OUTPUT_LIMIT ? text : `${text.slice(0, OUTPUT_LIMIT)}\n… [truncated]`
 const textOf = (blocks: readonly { type: string; text?: string }[]): string => blocks.filter(block => block.type === 'text' && block.text)
   .map(block => block.text).join('\n').trim()
+const addUsage = (total: TeamUsage | undefined, usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number }): TeamUsage => ({
+  input: (total?.input ?? 0) + (usage.inputTokens ?? 0), output: (total?.output ?? 0) + (usage.outputTokens ?? 0),
+  cached: (total?.cached ?? 0) + (usage.cacheReadTokens ?? 0) })
+const sumUsage = (members: readonly TeamMember[]): TeamUsage | undefined => {
+  const present = members.filter(member => member.usage)
+  if (!present.length) return undefined
+  return present.reduce<TeamUsage>((total, member) => addUsage(total, { inputTokens: member.usage!.input,
+    outputTokens: member.usage!.output, cacheReadTokens: member.usage!.cached }), { input: 0, output: 0, cached: 0 })
+}
+const parseVerdict = (text: string): MemberVerdict | undefined => {
+  const matches = [...text.matchAll(/\bVERDICT\s*:\s*(PASS|FAIL)\b/gi)]
+  const value = matches.at(-1)?.[1]?.toLowerCase()
+  return value === 'pass' ? 'pass' : value === 'fail' ? 'fail' : undefined
+}
+const outcomeText = (outcome: TeamOutcome): string => outcome === 'achieved' ? 'ACHIEVED'
+  : outcome === 'not_achieved' ? 'NOT ACHIEVED' : 'UNVERIFIED'
 
 /**
  * Creates and runs teams. A team starts six managed subagents from the configured worker roles; the lead plans, the
@@ -59,14 +88,22 @@ const textOf = (blocks: readonly { type: string; text?: string }[]): string => b
  */
 export class Teams {
   private readonly active = new Map<string, AbortController>()
-  constructor(private readonly host: TeamsHost) {}
+  /** Child Session id → the team role whose token usage it contributes to. */
+  private readonly usageTargets = new Map<string, { team: string; role: TeamRole }>()
+  /** Child Session ids whose usage was already observed live, so a final snapshot does not double-count it. */
+  private readonly usageObserved = new Set<string>()
+  constructor(private readonly host: TeamsHost) {
+    const context = host.context as unknown as { on?: (event: 'session/event', listener: (session: UsageSession, event: UsageEvent) => void) => void }
+    context.on?.('session/event', (session, event) => this.observeUsage(session.id, event))
+  }
 
   /** Lists teams newest first, with member states and a short summary. */
   list(): TeamSummary[] {
     const ids = [...(this.host.store.get(KV.teams.index) ?? [])].reverse()
     return ids.flatMap(id => { const team = this.get(id); return team ? [{ id: team.id, title: team.title, state: team.state,
       created_at: team.created_at, updated_at: team.updated_at, members: team.members.map(member => ({ role: member.role,
-        state: member.state })), ...team.summary ? { summary: team.summary } : {} }] : [] })
+        state: member.state })), ...team.summary ? { summary: team.summary } : {}, ...team.outcome ? { outcome: team.outcome } : {},
+      ...team.rounds ? { rounds: team.rounds } : {}, ...team.usage ? { usage: team.usage } : {} }] : [] })
   }
   /** Reads one team, or undefined when the id is unknown. */
   get(id: string): Team | undefined { return this.host.store.get(KV.teams.record(id)) }
@@ -137,10 +174,39 @@ export class Teams {
 
   private save(team: Team, created = false): void {
     team.updated_at = new Date().toISOString()
+    const usage = sumUsage(team.members)
+    if (usage) team.usage = usage
+    else delete team.usage
     this.host.store.atomic(() => {
       this.host.store.set(KV.teams.record(team.id), team)
       if (created) this.host.store.set(KV.teams.index, [...(this.host.store.get(KV.teams.index) ?? []), team.id])
     })
+  }
+
+  /** Adds one role's assistant-message usage as it is observed; a child Session's later messages accumulate onto the same role. */
+  private observeUsage(sessionId: string, event: UsageEvent): void {
+    if (event.type !== 'assistant/message' || !event.usage) return
+    const target = this.usageTargets.get(sessionId)
+    if (!target) return
+    this.usageObserved.add(sessionId)
+    this.recordUsage(target.team, target.role, event.usage)
+  }
+
+  private recordUsage(teamId: string, role: TeamRole, usage: NonNullable<UsageEvent['usage']>): void {
+    const team = this.get(teamId)
+    if (!team) return
+    const member = this.member(team, role)
+    member.usage = addUsage(member.usage, usage)
+    this.save(team)
+  }
+
+  /** A fallback for a child whose live events were missed; returns undefined when the Session is already gone. */
+  private snapshotUsage(sessionId: string): TeamUsage | undefined {
+    const sessions = (this.host.context as unknown as { sessions?: SessionLookup }).sessions
+    const events = sessions?.get(sessionId)?.snapshotEvents() ?? []
+    let usage: TeamUsage | undefined
+    for (const event of events) if (event.type === 'assistant/message' && event.usage) usage = addUsage(usage, event.usage)
+    return usage
   }
   private finish(team: Team, state: TeamState, error?: string): void {
     team.state = state
@@ -186,7 +252,7 @@ export class Teams {
   }
 
   /** Runs one role to completion and returns its text. Attached images follow the text when the role's model accepts them. */
-  private async run(team: Team, role: TeamRole, prompt: string, parent: Agent, signal: AbortSignal, images: readonly ImageBlock[] = []): Promise<string> {
+  private async run(team: Team, role: TeamRole, prompt: string, parent: Agent, signal: AbortSignal, images: readonly ImageBlock[] = [], round = 1): Promise<string> {
     const member = this.member(team, role)
     const settings = this.host.settings()
     const profileId = member.profile
@@ -194,7 +260,8 @@ export class Teams {
     const model = profile?.model ?? settings.executor.model
     const subagents = (this.host.context as unknown as { subagents?: Subagents }).subagents
     if (!subagents) throw new Error('The subagent service is not available in this DSH profile')
-    member.state = 'running'; member.started_at = new Date().toISOString(); delete member.error; this.save(team)
+    member.state = 'running'; member.started_at = new Date().toISOString(); member.round = round; delete member.error
+    delete member.verdict; this.save(team)
     const agentOptions = model ? { provider: model.provider, model: model.model, ...model.reasoningEffort ? { reasoningEffort: model.reasoningEffort } : {} } : undefined
     const rolePrompt = profile?.instructions ? `${ROLE_INSTRUCTIONS[role]}\n\n${profile.instructions}` : ROLE_INSTRUCTIONS[role]
     const text = `${rolePrompt}\n\nTask:\n${prompt}\n\nWork in the current working directory. Do not ask questions; make the best decision and report evidence.`
@@ -208,20 +275,35 @@ export class Teams {
       member.state = 'failed'; member.error = String(error).slice(0, 1000); member.ended_at = new Date().toISOString(); this.save(team)
       throw error
     }
-    member.session_id = activation.childId; this.save(team)
+    const childId = activation.childId
+    member.session_id = childId
+    this.usageTargets.set(childId, { team: team.id, role })
+    this.save(team)
     try {
       const result = await activation.result
       const output = textOf(result.output)
+      if (role === 'tester' || role === 'reviewer') {
+        const verdict = parseVerdict(output)
+        if (verdict) member.verdict = verdict; else delete member.verdict
+      }
       member.output = clip(output || result.diagnostic || '')
       member.state = result.stopReason === 'completed' ? 'done' : 'failed'
       if (result.stopReason !== 'completed') member.error = result.diagnostic ?? result.stopReason
+      if (!this.usageObserved.has(childId)) {
+        const usage = this.snapshotUsage(childId)
+        if (usage) this.recordUsage(team.id, role, { inputTokens: usage.input, outputTokens: usage.output, cacheReadTokens: usage.cached })
+      }
       member.ended_at = new Date().toISOString(); this.save(team)
       return member.output
     } catch (error) {
       member.state = signal.aborted ? 'stopped' : 'failed'; member.error = String(error).slice(0, 1000); member.ended_at = new Date().toISOString(); this.save(team)
       return ''
     } finally {
-      await activation.dispose().catch(error => this.host.logger.warn(`team ${team.id}: subagent cleanup failed: ${String(error)}`))
+      try {
+        await activation.dispose().catch(error => this.host.logger.warn(`team ${team.id}: subagent cleanup failed: ${String(error)}`))
+      } finally {
+        this.usageTargets.delete(childId); this.usageObserved.delete(childId)
+      }
     }
   }
 
@@ -233,24 +315,59 @@ export class Teams {
     const task = team.task
     const plan = await this.run(team, 'lead', `${task}\n\nFirst produce the plan only; the team implements after it.`, parent, signal, images)
     if (signal.aborted) return
-    await Promise.all([
-      this.run(team, 'researcher', `${task}\n\nPlan:\n${plan}\n\nGather the repository and external context the implementer needs.`, parent, signal, images),
-      this.run(team, 'developer', `${task}\n\nPlan:\n${plan}\n\nImplement the task now.`, parent, signal, images),
-    ])
+    let round = 1
+    let history = ''
+    let verification = ''
+    let outcome: TeamOutcome = 'unverified'
+    while (true) {
+      team.rounds = round; this.save(team)
+      if (round === 1) {
+        await Promise.all([
+          this.run(team, 'researcher', `${task}\n\nPlan:\n${plan}\n\nGather the repository and external context the implementer needs.`, parent, signal, images, round),
+          this.run(team, 'developer', `${task}\n\nPlan:\n${plan}\n\nImplement the task now.`, parent, signal, images, round),
+        ])
+      } else {
+        const previous = this.contextOf(team, ['researcher', 'developer'])
+        const repair = await this.run(team, 'lead', `${task}\n\nPlan:\n${plan}\n\nRound ${round - 1} did not pass verification:\n${verification}\n\n` +
+          'Write concise repair instructions for the developer: the concrete changes, acceptance criteria and checks to rerun. Do not edit files.', parent, signal, images, round)
+        if (signal.aborted) return
+        await this.run(team, 'developer', `${task}\n\nPlan:\n${plan}\n\nCurrent implementation evidence:\n${previous}\n\n` +
+          `Verification failure:\n${verification}\n\nLead repair instructions:\n${repair}\n\nApply the repair now.`, parent, signal, images, round)
+      }
+      if (signal.aborted) return
+      const work = this.contextOf(team, ['researcher', 'developer'])
+      const prior = history ? `\n\nEarlier verification:\n${history}` : ''
+      await Promise.all([
+        this.run(team, 'tester', `${task}\n\nPlan:\n${plan}\n\n${work}${prior}\n\nTest the implementation and report the commands and results.`, parent, signal, images, round),
+        this.run(team, 'reviewer', `${task}\n\nPlan:\n${plan}\n\n${work}${prior}\n\nReview the implementation and report findings; do not edit. ` +
+          'If the task is a product or feature design that can be verified visually, include a real screenshot and its path as evidence.', parent, signal, images, round),
+      ])
+      if (signal.aborted) return
+      verification = this.contextOf(team, ['tester', 'reviewer'])
+      const tester = this.member(team, 'tester'), reviewer = this.member(team, 'reviewer')
+      const testerVerdict = tester.verdict, reviewerVerdict = reviewer.verdict
+      this.save(team)
+      if (tester.state === 'failed' || reviewer.state === 'failed') { outcome = 'not_achieved'; break }
+      if (testerVerdict === 'pass' && reviewerVerdict === 'pass') { outcome = 'achieved'; break }
+      if (testerVerdict !== 'fail' && reviewerVerdict !== 'fail') { outcome = 'unverified'; break }
+      if (round >= MAX_ROUNDS) { outcome = 'not_achieved'; break }
+      history = clip(`${history}\n\n## Round ${round}\n${verification}`)
+      round += 1
+    }
     if (signal.aborted) return
-    const work = this.contextOf(team, ['lead', 'researcher', 'developer'])
-    await Promise.all([
-      this.run(team, 'tester', `${task}\n\n${work}\n\nTest the implementation and report the commands and results.`, parent, signal, images),
-      this.run(team, 'reviewer', `${task}\n\n${work}\n\nReview the implementation and report findings; do not edit. If the task is a product or feature design that can be verified visually, include a real screenshot and its path as evidence.`, parent, signal, images),
-    ])
-    if (signal.aborted) return
-    await this.run(team, 'ops', `${task}\n\n${work}\n\nInspect CI and repository status; do not edit.`, parent, signal, images)
+    team.rounds = round; this.save(team)
+    const finalWork = this.contextOf(team, ['researcher', 'developer'])
+    await this.run(team, 'ops', `${task}\n\n${finalWork}\n\nVerification:\n${verification}\n\nInspect CI and repository status; do not edit.`, parent, signal, images, round)
     if (signal.aborted) return
     const evidence = this.contextOf(team, TEAM_ROLES)
-    const synthesis = await this.run(team, 'lead', `${task}\n\nAll team evidence:\n${evidence}\n\nSynthesize the final result: what changed, what was verified, ` +
-      'what failed, and what a human should do next. This is the team summary.', parent, signal, images)
+    const synthesis = await this.run(team, 'lead', `${task}\n\nPlan:\n${plan}\n\nAll team evidence:\n${evidence}\n\n` +
+      `Final verification outcome: ${outcomeText(outcome)} after round ${round}. Synthesize the final result: what changed, what was verified, ` +
+      'what failed, and what a human should do next. Do not claim success when the outcome is NOT ACHIEVED or UNVERIFIED. This is the team summary.',
+    parent, signal, images, round)
     team.summary = clip(synthesis)
+    team.outcome = outcome
     team.state = 'done'
     this.save(team)
   }
+
 }

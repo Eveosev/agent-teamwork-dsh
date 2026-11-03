@@ -37,6 +37,11 @@
 .dt-open-wrap { white-space: normal; }
 .dt-open:focus-visible::after { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
 .dt-row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption); overflow-wrap: anywhere; }
+.dt-tag-group { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.dt-token-usage { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+.dt-token-usage-label { color: var(--dsw-alias-label-secondary); font-weight: 500; }
+.dt-token-usage strong { color: var(--dsw-alias-label-secondary); font-weight: 500; }
+
 .dt-row-quote { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 /* Transparent block borders preserve vertical spacing when line clamping clips padding. */

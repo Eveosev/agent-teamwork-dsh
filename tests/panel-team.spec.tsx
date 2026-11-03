@@ -13,6 +13,9 @@ it('lists teams with their state, progress and member dots, and opens the six ro
   expect(text()).toContain('1 个运行中')
   expect(all('.dt-list .dt-row-title').map(title => title.textContent)).toEqual(['修复登录页回归', '发布检查'])
   expect(all('.dt-team-dots').map(strip => strip.querySelectorAll('.dt-dot').length)).toEqual([6, 6])
+  expect(text()).toContain(zh['teamOutcome.achieved'])
+  expect(text()).toContain(zh.teamTokens)
+  expect(text()).toContain(zh.teamTokenCached)
   await click(all('.dt-open').find(button => button.textContent === '修复登录页回归')!)
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复登录页回归')
   expect(all('.dt-page-head button')[0]?.textContent).toBe(zh['tab.team'])
@@ -78,6 +81,29 @@ it('shows the final summary of a finished team without a stop action', async () 
   expect(document.querySelector('.dt-md-table th')?.textContent).toBe('Check')
   expect(all('.dt-md-table td').map(cell => cell.textContent)).toEqual(['tests', '✅', 'build', '✅'])
   expect(all('button').some(button => button.textContent === zh.stop)).toBe(false)
+  expect(text()).toContain(zh['teamOutcome.achieved'])
+  expect(text()).toContain(zh.teamTokens)
+  expect(text()).toContain(zh.teamTokenInput)
+  expect(text()).toContain(zh.teamTokenOutput)
+  expect(text()).toContain(zh.teamTokenCached)
+})
+
+it('shows a finished team with no recorded outcome as unverified, never implicitly successful', async () => {
+  delete server.teams.details['team-2']!.outcome
+  delete server.teams.items.find(team => team.id === 'team-2')!.outcome
+  await mount()
+  await click(tab(zh['tab.team']))
+  expect(text()).toContain(zh['teamOutcome.unverified'])
+})
+
+it('marks a finished team that did not meet its goal instead of showing only Done', async () => {
+  const team = server.teams.details['team-2']!
+  team.outcome = 'not_achieved'
+  team.summary = 'The build passed, but the acceptance criteria were not met.'
+  at({ page: 'team', id: 'team-2' })
+  await mount()
+  const badge = document.querySelector<HTMLElement>('.dt-status-line .dt-tag[data-tone="danger"]')
+  expect(badge?.textContent).toBe(zh['teamOutcome.not_achieved'])
 })
 
 it('opens the collapsed final summary in a Markdown reading dialog', async () => {

@@ -125,7 +125,9 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
     interrupt: vi.fn((id: string) => { settle(id) }),
     startActivation: vi.fn(async (spec: { label: string; request: { parent: { id: string } }; signal: AbortSignal }) => {
       const id = spawn(spec.request.parent.id)
-      return { childId: id, result: Promise.resolve({ output: [{ type: 'text', text: `${spec.label} done` }], stopReason: 'completed' }),
+      const role = spec.label.split(' · ')[1]
+      const verdict = role === 'Tester' || role === 'Reviewer' ? '\n\nVERDICT: PASS' : ''
+      return { childId: id, result: Promise.resolve({ output: [{ type: 'text', text: `${spec.label} done${verdict}` }], stopReason: 'completed' }),
         dispose: async () => { settle(id) } }
     }),
   }

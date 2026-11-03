@@ -235,7 +235,8 @@ function threadPage(key: string, { before, around }: { before?: string; around?:
 }
 const TEAM_ROLE_NAMES = ['lead', 'researcher', 'developer', 'tester', 'reviewer', 'ops'] as const
 const teamSummary = (team: Team): TeamSummary => ({ id: team.id, title: team.title, state: team.state, created_at: team.created_at,
-  updated_at: team.updated_at, members: team.members.map(({ role, state }) => ({ role, state })), ...team.summary ? { summary: team.summary } : {} })
+  updated_at: team.updated_at, members: team.members.map(({ role, state }) => ({ role, state })), ...team.summary ? { summary: team.summary } : {},
+  ...team.outcome ? { outcome: team.outcome } : {}, ...team.rounds ? { rounds: team.rounds } : {}, ...team.usage ? { usage: team.usage } : {} })
 const teamMember = (role: TeamMember['role'], state: TeamMember['state'], extra: Partial<TeamMember> = {}): TeamMember =>
   ({ role, profile: null, state, ...extra })
 function teamFixtures(): PanelServer['teams'] {
@@ -259,8 +260,11 @@ function teamFixtures(): PanelServer['teams'] {
     id: 'team-2', title: '发布检查', task: '检查发布状态。', state: 'done', created_at: at(1_800_000), updated_at: at(1_200_000),
     parent_session_id: 'master', directory: '/tmp/team',
     summary: 'All checks passed. **No action** is needed.\n\n| Check | Result |\n|:---|---:|\n| tests | ✅ |\n| build | ✅ |',
+    outcome: 'achieved', rounds: 2, usage: { input: 7200, output: 1800, cached: 5100 },
     members: TEAM_ROLE_NAMES.map(role =>
-      teamMember(role, 'done', { started_at: at(1_800_000), ended_at: at(1_200_000) })),
+      teamMember(role, 'done', { started_at: at(1_800_000), ended_at: at(1_200_000), round: 2,
+        ...role === 'tester' || role === 'reviewer' ? { verdict: 'pass' as const } : {},
+        usage: { input: 1200, output: 300, cached: 850 } })),
   }
   return { items: [teamSummary(running), teamSummary(done)], details: { [running.id]: running, [done.id]: done } }
 }

@@ -7,21 +7,40 @@ const settings = (paused = false) => SettingsSchema.parse({ paused, executor: { 
   developer: { model: { provider: 'llm-center', model: 'deepseek-v4.1-flash-mb' } },
 }, defaultProfile: 'developer' } })
 
-function bench(options: { paused?: boolean; pending?: boolean; modalities?: readonly string[]; custom?: Settings } = {}) {
+function bench(options: { paused?: boolean; pending?: boolean; modalities?: readonly string[]; custom?: Settings
+  failFirst?: boolean; alwaysFail?: boolean; usage?: { input: number; output: number; cached: number }
+  liveUsage?: { input: number; output: number; cached: number } } = {}) {
   const values = new Map<string, unknown>()
+  const attempts = new Map<string, number>()
+  const usageListeners: ((session: { id: string }, event: { type: string; usage?: Record<string, number> }) => void)[] = []
   const runs: { label: string; prompt: string; blocks: readonly { type: string; text?: string }[]; agentOptions?: unknown; preset?: string
     signal: AbortSignal }[] = []
   const subagents = { startActivation: vi.fn(async (spec: { label: string; request: { prompt: { type: string; text?: string }[]; agentOptions?: unknown
     agentPreset?: string }; signal: AbortSignal }) => {
     runs.push({ label: spec.label, prompt: spec.request.prompt.map(block => block.text).join(''), blocks: spec.request.prompt,
       agentOptions: spec.request.agentOptions, preset: spec.request.agentPreset, signal: spec.signal })
-    const result = options.pending ? new Promise<never>(() => {}) : Promise.resolve({ output: [{ type: 'text', text: `${spec.label} result` }],
-      stopReason: 'completed' as const })
-    return { childId: `child-${runs.length}`, result, dispose: async () => {} }
+    const role = spec.label.split(' · ')[1] ?? ''
+    const attempt = (attempts.get(role) ?? 0) + 1; attempts.set(role, attempt)
+    const verdict = role !== 'Tester' && role !== 'Reviewer' ? '' : options.alwaysFail || options.failFirst && attempt === 1 ? '\n\nVERDICT: FAIL'
+      : '\n\nVERDICT: PASS'
+    const output = { output: [{ type: 'text', text: `${spec.label} result${verdict}` }], stopReason: 'completed' as const }
+    const childId = `child-${runs.length}`
+    const result = options.pending ? new Promise<never>(() => {}) : options.liveUsage ? new Promise<typeof output>(resolve => {
+      setTimeout(() => {
+        for (const listener of usageListeners) listener({ id: childId }, { type: 'assistant/message', usage: {
+          inputTokens: options.liveUsage!.input, outputTokens: options.liveUsage!.output, cacheReadTokens: options.liveUsage!.cached } })
+        resolve(output)
+      }, 0)
+    }) : Promise.resolve(output)
+    return { childId, result, dispose: async () => {} }
   }) }
   const llm = { resolveModelInfo: vi.fn(async (_provider: string, _model: string) =>
     options.modalities === undefined ? {} : { inputModalities: options.modalities }) }
-  const host: TeamsHost = { context: { subagents, llm } as never, masterId: 'master', stateDir: '/tmp/team-state',
+  const sessions = options.usage ? { get: () => ({ snapshotEvents: () => [{ type: 'assistant/message',
+    usage: { inputTokens: options.usage!.input, outputTokens: options.usage!.output, cacheReadTokens: options.usage!.cached } }] }) } : undefined
+  const host: TeamsHost = { context: { subagents, llm, ...sessions ? { sessions } : {},
+    ...options.liveUsage ? { on: (_event: string, listener: (session: { id: string }, event: { type: string; usage?: Record<string, number> }) => void) =>
+      usageListeners.push(listener) } : {} } as never, masterId: 'master', stateDir: '/tmp/team-state',
     settings: () => options.custom ?? settings(options.paused), logger: { warn: () => {} }, store: { get: key => values.get(key) as never,
       set: (key, value) => { values.set(key, value) }, atomic: <T>(run: () => T) => run() } }
   return { teams: new Teams(host), runs, subagents, llm }
@@ -45,8 +64,57 @@ describe('Teams', () => {
     expect(stored.members.map(member => member.role)).toEqual([...TEAM_ROLES])
     expect(stored.members.every(member => member.state === 'done')).toBe(true)
     expect(stored.summary).toContain('Team lead result')
+    expect(stored.outcome).toBe('achieved')
+    expect(stored.rounds).toBe(1)
+    expect(stored.members.find(member => member.role === 'tester')?.verdict).toBe('pass')
+    expect(stored.members.find(member => member.role === 'reviewer')?.verdict).toBe('pass')
     expect(teams.list()[0]).toMatchObject({ id: team.id, state: 'done' })
     expect(teams.activeCount).toBe(0)
+  })
+
+  it('re-dispatches a failed verification through the lead and passes on the next round', async () => {
+    const { teams, runs } = bench({ failFirst: true })
+    const team = teams.create('Add the settings page', parent)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    expect(runs.map(run => run.label.split(' · ')[1])).toEqual(['Team lead', 'Researcher', 'Developer', 'Tester', 'Reviewer',
+      'Team lead', 'Developer', 'Tester', 'Reviewer', 'Ops', 'Team lead'])
+    expect(runs[5]!.prompt).toContain('Write concise repair instructions')
+    expect(runs[6]!.prompt).toContain('Lead repair instructions:')
+    const stored = teams.get(team.id)!
+    expect(stored.outcome).toBe('achieved')
+    expect(stored.rounds).toBe(2)
+    expect(stored.members.find(member => member.role === 'developer')?.round).toBe(2)
+    expect(stored.members.find(member => member.role === 'tester')?.verdict).toBe('pass')
+  })
+
+  it('marks a team whose verification never passes as not achieved after the round limit', async () => {
+    const { teams, runs } = bench({ alwaysFail: true })
+    const team = teams.create('Never passes', parent)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    expect(teams.get(team.id)?.outcome).toBe('not_achieved')
+    expect(teams.get(team.id)?.rounds).toBe(3)
+    expect(runs).toHaveLength(15)
+  })
+
+  it('collects token usage from live child session events without double-counting', async () => {
+    const { teams } = bench({ liveUsage: { input: 100, output: 40, cached: 60 } })
+    const team = teams.create('Measure live tokens', parent)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    const stored = teams.get(team.id)!
+    expect(stored.members.find(member => member.role === 'lead')?.usage).toEqual({ input: 200, output: 80, cached: 120 })
+    expect(stored.members.find(member => member.role === 'tester')?.usage).toEqual({ input: 100, output: 40, cached: 60 })
+    expect(stored.usage).toEqual({ input: 700, output: 280, cached: 420 })
+  })
+
+  it('sums input, output and cached tokens per role and for the team', async () => {
+    const { teams } = bench({ usage: { input: 100, output: 40, cached: 60 } })
+    const team = teams.create('Measure tokens', parent)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    const stored = teams.get(team.id)!
+    expect(stored.members.every(member => member.usage)).toBe(true)
+    expect(stored.members.find(member => member.role === 'lead')?.usage).toEqual({ input: 200, output: 80, cached: 120 })
+    expect(stored.usage).toEqual({ input: 700, output: 280, cached: 420 })
+    expect(teams.list()[0]?.usage).toEqual({ input: 700, output: 280, cached: 420 })
   })
 
   it('requires the reviewer to provide screenshot evidence for visually verifiable design', async () => {
