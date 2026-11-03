@@ -43,6 +43,7 @@ export interface Api {
   'POST teams': { body: { task: string; title?: string; directory?: string }; response: { team: Team } }
   'POST teams/:id/continue': { body: { instruction?: string; images?: TeamImageUpload[] }; response: { team: Team } }
   'POST teams/:id/stop': { response: { stopped: boolean } }
+  'POST teams/:id/delete': { response: { deleted: boolean } }
   'GET tickets': { query?: Paged & { state?: TicketFilter }; response: TicketListView }
   'GET tickets/:id': { response: TicketPageView }
   'POST tickets/:id/retry': { response: { retried: true } }

@@ -182,7 +182,12 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
       {running ? <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
         message={t('teamStopConfirm', { title: team.title })}
         onConfirm={async () => { await call('POST teams/:id/stop', { id: team.id }); await reload() }} />
-        : <ContinueTeamButton team={team} onStarted={reload} />}
+        : <>
+          <ContinueTeamButton team={team} onStarted={reload} />
+          <ConfirmButton variant="outline" icon="trash" label={t('remove')} title={t('teamDeleteTitle')}
+            message={t('teamDeleteConfirm', { title: team.title })}
+            onConfirm={async () => { await call('POST teams/:id/delete', { id: team.id }); await reload(); return true }} />
+        </>}
     </div>
   </li>
 }
@@ -379,7 +384,12 @@ export function TeamPage({ id }: { id: string }) {
       {running ? <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
         message={t('teamStopConfirm', { title: data.title })}
         onConfirm={async () => { await call('POST teams/:id/stop', { id }); await reload() }} />
-        : <ContinueTeamButton team={data} source={data} onStarted={reload} />}
+        : <>
+          <ContinueTeamButton team={data} source={data} onStarted={reload} />
+          <ConfirmButton variant="outline" icon="trash" label={t('remove')} title={t('teamDeleteTitle')}
+            message={t('teamDeleteConfirm', { title: data.title })}
+            onConfirm={async () => { await call('POST teams/:id/delete', { id }); navigate({ page: 'team' }); return true }} />
+        </>}
     </div>
     {data.error && <p className="dt-banner dt-danger dt-mono">
       <span className="dt-banner-label">{t('teamError')}{t('labelSeparator')}</span>{data.error}

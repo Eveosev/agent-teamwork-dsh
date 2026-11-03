@@ -48,7 +48,7 @@ function bench(options: { paused?: boolean; pending?: boolean; modalities?: read
     get: () => { throw new Error('cannot get property "sessions" without inject') } })
   const host: TeamsHost = { context: context as never, masterId: 'master', stateDir: '/tmp/team-state',
     settings: () => options.custom ?? settings(options.paused), logger: { warn: () => {} }, store: { get: key => values.get(key) as never,
-      set: (key, value) => { values.set(key, value) }, atomic: <T>(run: () => T) => run() } }
+      set: (key, value) => { values.set(key, value) }, delete: key => { values.delete(key) }, atomic: <T>(run: () => T) => run() } }
   return { teams: new Teams(host), runs, subagents, llm, store: host.store }
 }
 const parent = { id: 'master' } as never
@@ -123,7 +123,24 @@ describe('Teams', () => {
     await vi.waitFor(() => expect(runs.length).toBeGreaterThan(0))
     expect(() => teams.continueTeam(team.id, parent)).toThrow('still running')
     expect(() => teams.continueTeam('missing', parent)).toThrow('Team not found')
+    expect(() => teams.remove(team.id)).toThrow('Stop the team before deleting it')
     teams.stop(team.id)
+  })
+
+  it('deletes a team card and its continuation lineage', async () => {
+    const { teams, store } = bench()
+    const parentTeam = teams.create('Delete parent', parent)
+    await vi.waitFor(() => expect(teams.get(parentTeam.id)?.state).toBe('done'))
+    const child = teams.create('Delete child', parent)
+    await vi.waitFor(() => expect(teams.get(child.id)?.state).toBe('done'))
+    const record = teams.get(child.id)!
+    record.continued_from = parentTeam.id
+    store.set(KV.teams.record(child.id), record)
+    expect(teams.remove('missing')).toBe(false)
+    expect(teams.remove(child.id)).toBe(true)
+    expect(teams.get(child.id)).toBeUndefined()
+    expect(teams.get(parentTeam.id)).toBeUndefined()
+    expect(teams.list()).toEqual([])
   })
 
   it('re-dispatches a failed verification through the lead and passes on the next round', async () => {

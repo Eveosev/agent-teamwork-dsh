@@ -72,7 +72,7 @@ interface UsageSession { id: string }
 interface SessionEvents { snapshotEvents(): readonly UsageEvent[] }
 interface AgentLookup { get(id: string): { session: SessionEvents } | undefined }
 
-export interface TeamsHost { context: Context; store: Pick<Store, 'get' | 'set' | 'atomic'>; masterId: string; stateDir: string; settings(): Settings
+export interface TeamsHost { context: Context; store: Pick<Store, 'get' | 'set' | 'delete' | 'atomic'>; masterId: string; stateDir: string; settings(): Settings
   logger: { warn(message: string): void } }
 const MAX_ACTIVE_TEAMS = 3
 /** At most this many implementation/verification rounds, including the first; later rounds are lead-directed repairs. */
@@ -166,6 +166,38 @@ export class Teams {
       for (const member of team.members) if (member.state === 'running') { member.state = 'failed'; member.error ??= team.error }
       this.save(team)
     }
+  }
+
+  /**
+   * Deletes a Team card together with its continuation lineage. The working directory and child Sessions are preserved:
+   * this removes the panel record, not the evidence on disk. Running teams must be stopped first.
+   */
+  remove(id: string): boolean {
+    const team = this.get(id)
+    if (!team) return false
+    if (team.state === 'running' || this.active.has(id)) throw new Error('Stop the team before deleting it')
+    const ids = this.host.store.get(KV.teams.index) ?? []
+    const records = new Map(ids.map(item => [item, this.get(item)]).filter((entry): entry is [string, Team] => !!entry[1]))
+    let root = id
+    const seen = new Set<string>()
+    while (!seen.has(root)) {
+      seen.add(root)
+      const parent = records.get(root)?.continued_from
+      if (!parent || !records.has(parent)) break
+      root = parent
+    }
+    const lineage = new Set<string>([root])
+    for (let changed = true; changed;) {
+      changed = false
+      for (const [item, record] of records) {
+        if (!lineage.has(item) && record.continued_from && lineage.has(record.continued_from)) { lineage.add(item); changed = true }
+      }
+    }
+    this.host.store.atomic(() => {
+      this.host.store.set(KV.teams.index, ids.filter(item => !lineage.has(item)))
+      for (const item of lineage) this.host.store.delete(KV.teams.record(item))
+    })
+    return true
   }
 
   /** Aborts every running team, for shutdown. */
@@ -404,8 +436,11 @@ export class Teams {
       member.state = result.stopReason === 'completed' ? 'done' : 'failed'
       if (result.stopReason !== 'completed') member.error = result.diagnostic ?? result.stopReason
       if (!this.usageObserved.has(childId)) {
-        const usage = this.snapshotUsage(childId)
-        if (usage) this.recordUsage(team.id, role, { inputTokens: usage.input, outputTokens: usage.output, cacheReadTokens: usage.cached })
+        // Usage accounting must never turn a completed role into a failed one, even if the fallback lookup or save fails.
+        try {
+          const usage = this.snapshotUsage(childId)
+          if (usage) this.recordUsage(team.id, role, { inputTokens: usage.input, outputTokens: usage.output, cacheReadTokens: usage.cached })
+        } catch (error) { this.host.logger.warn(`team ${team.id}: usage snapshot failed: ${String(error)}`) }
       }
       member.ended_at = new Date().toISOString(); this.save(team)
       return member.output

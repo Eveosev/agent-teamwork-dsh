@@ -37,7 +37,7 @@ export interface HttpHost {
   readonly sources: SourceRegistry
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'ensure'>
-  readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'continueTeam' | 'stop' | 'activeCount' | 'readFile'>
+  readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'continueTeam' | 'stop' | 'remove' | 'activeCount' | 'readFile'>
   /** Admits browser image uploads into durable attachment references for a Team continuation. */
   admitImages(images: readonly TeamImageUpload[]): Promise<ImageBlock[]>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
@@ -228,6 +228,11 @@ function routes(runtime: HttpHost): Routes {
       return { team: runtime.teams.continueTeam(source.id, agent, request.instruction ?? '', images) }
     },
     'POST teams/:id/stop': ({ params }) => { team(params.id); return { stopped: runtime.teams.stop(params.id) } },
+    'POST teams/:id/delete': ({ params }) => {
+      const source = team(params.id)
+      if (source.state === 'running') throw new RouteError(400, 'Stop the team before deleting it')
+      return { deleted: runtime.teams.remove(params.id) }
+    },
     'GET tickets': ({ query }) => {
       const { state, offset, limit } = TicketsQuery.parse(query)
       return ticketList(views(runtime), state, offset, limit)

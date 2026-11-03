@@ -103,6 +103,15 @@ it('continues a finished team from its page with an optional instruction', async
   expect(all('.dt-grid3 .dt-card').length).toBe(6)
 })
 
+it('deletes a terminal team from the list after confirmation', async () => {
+  await mount()
+  await click(tab(zh['tab.team']))
+  await click(zh.remove)
+  await click(zh.confirm)
+  expect(all('.dt-list .dt-row-title').map(title => title.textContent)).toEqual(['修复登录页回归'])
+  expect(server.teams.details['team-2']).toBeUndefined()
+})
+
 it('attaches screenshots to a continuation', async () => {
   at({ page: 'team', id: 'team-2' })
   await mount()

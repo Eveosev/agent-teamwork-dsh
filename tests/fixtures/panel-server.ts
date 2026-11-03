@@ -401,6 +401,14 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     server.teams.items = [teamSummary(source), ...server.teams.items.filter(team => team.id !== source.id)]
     return { team: source }
   } },
+  'POST teams/:id/delete': { answer: ({ params }) => {
+    const team = server.teams.details[params.id]
+    if (!team) return refuse(404, `No team ${params.id}`)
+    if (team.state === 'running') return refuse(400, 'Stop the team before deleting it')
+    server.teams.details = Object.fromEntries(Object.entries(server.teams.details).filter(([id]) => id !== params.id))
+    server.teams.items = server.teams.items.filter(item => item.id !== params.id)
+    return { deleted: true }
+  } },
   'POST teams/:id/stop': { answer: ({ params }) => {
     const team = server.teams.details[params.id]
     if (!team) return refuse(404, `No team ${params.id}`)

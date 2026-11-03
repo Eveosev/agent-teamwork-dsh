@@ -134,6 +134,10 @@ describe('/team', () => {
     host.runtime.store.saveSettings({ ...settings, paused: true })
     expect((await host.api('POST', 'teams', { task: 'blocked' })).status).toBe(400)
     host.runtime.store.saveSettings({ ...settings, paused: false })
+    const removed = await host.api('POST', `teams/${team.id}/delete`)
+    expect(removed.status).toBe(200)
+    expect(removed.body).toMatchObject({ deleted: true })
+    expect((await host.api('GET', `teams/${team.id}`)).status).toBe(404)
   })
 
   it('reports status, refuses while paused, and stops a running team', async () => {
