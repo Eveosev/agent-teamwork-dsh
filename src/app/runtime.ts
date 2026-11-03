@@ -10,7 +10,9 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
+import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
+import type { TeamImageUpload } from './api.ts'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
@@ -82,6 +84,8 @@ export class Runtime extends Service implements SourceHost {
   private readonly sourceLinks = new TextCache(200_000)
   private readonly stopped = new AbortController()
   private readonly disposers: (() => void)[] = []
+  /** Optional attachment service; headless profiles may not mount it, so image continuation fails with a clear error. */
+  private attachments?: AttachmentStore
   private releaseLock?: () => Promise<void>
   private closingFlag = false
   private stopping?: Promise<void>
@@ -92,6 +96,8 @@ export class Runtime extends Service implements SourceHost {
   constructor(ctx: Context, readonly machine: Machine, restart: () => void) {
     super(ctx, 'orchestrator')
     const runtime = this
+    // Attachment storage is optional in headless profiles. The continuation UI only needs it when images are attached.
+    ctx.inject(['attachments'], child => { this.attachments = child.attachments })
     // Lock the state directory before opening the database so another process cannot migrate or write concurrently.
     mkdirSync(machine.stateDir, { recursive: true, mode: 0o700 })
     const compromised = (error: Error) => { this.runtimeHealth.set({ state: 'error', detail: error.message }); this.stopped.abort() }
@@ -269,6 +275,14 @@ export class Runtime extends Service implements SourceHost {
         } }))
     })
   }
+  /** Admit browser image uploads into durable attachment references; used by the Team continuation route. */
+  async admitImages(images: readonly TeamImageUpload[]): Promise<ImageBlock[]> {
+    if (!this.attachments) throw new Error('Image attachments are unavailable in this DSH profile')
+    const admitted = await this.attachments.admitPromptContent(images.map(image => ({ type: 'image' as const,
+      mediaType: image.mediaType, data: image.data, ...image.name ? { name: image.name } : {} })))
+    return admitted.flatMap(part => part.type === 'image' ? [{ type: 'image' as const, attachment: part.attachment }] : [])
+  }
+
   private httpHost(): HttpHost {
     const runtime = this
     const { store, sources, prompts, sessions, teams, settings, engine, executor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
@@ -276,7 +290,8 @@ export class Runtime extends Service implements SourceHost {
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
-      checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, models: () => this.ctx.sessionController.modelCatalog() }
+      checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, models: () => this.ctx.sessionController.modelCatalog(),
+      admitImages: images => this.admitImages(images) }
   }
   /** Idempotent stop; concurrent or repeated calls share the same shutdown promise. */
   stop(): Promise<void> { return this.stopping ??= this.shutdown() }

@@ -83,7 +83,7 @@ The record keeps `continuations` and the prior attempt's `previous_summary`, `pr
 
 Older continuation records created before in-place continuation retain their `continued_from` / `continued_from_title` audit link; the list shows only the latest card of such a lineage, and that card links back to the earlier records. The panel also has a compatibility path for a host that predates `POST teams/:id/continue`: it carries the source ID, task, evidence and request in the task of a normal new Team, titles it with a continuation marker, and reports the six recipients. Restarting the host enables in-place continuation and the persistent recipient section.
 
-Continuation requires the source to be terminal, processing to be unpaused, and an available team slot. Attached images are not carried into the continuation because Team records store text only; add them through a new `/team` invocation when needed.
+Continuation requires the source to be terminal, processing to be unpaused, and an available team slot. The panel dialog can attach up to four screenshots (PNG, JPEG, WebP or GIF, 8 MB each); the Host admits them through `ctx.attachments` and sends them to every role after the text, exactly like a fresh `/team` image. Team records still store text only, so the attachments live in the role prompts rather than in the saved Team.
 
 ## API
 

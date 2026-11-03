@@ -1,6 +1,6 @@
 /** Team list with a start form and team detail with the six role cards, member sessions, outputs and final summary. */
-import { useState, type FormEvent } from 'react'
-import { TEAM_FILTERS, type ApiResponse, type TeamFilter } from '../app/api.ts'
+import { useRef, useState, type FormEvent } from 'react'
+import { TEAM_FILTERS, type ApiResponse, type TeamFilter, type TeamImageUpload } from '../app/api.ts'
 import { ApiError, usePoll } from './api.ts'
 import { Button, Dot, Icon, InfoTip, Input, Modal, Pill, Tag, type DotState, type TagTone } from './controls.tsx'
 import { useAction, usePanel } from './provider.tsx'
@@ -15,6 +15,10 @@ type MemberState = TeamMember['state']
 type TeamRole = TeamMember['role']
 type TeamOutcome = NonNullable<Team['outcome']>
 type TeamUsage = NonNullable<Team['usage']>
+type PendingImage = TeamImageUpload & { preview: string }
+const MAX_CONTINUATION_IMAGES = 4
+const MAX_CONTINUATION_IMAGE_BYTES = 8 * 1024 * 1024
+const CONTINUATION_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
 
 const TEAM_ROLES = ['lead', 'researcher', 'developer', 'tester', 'reviewer', 'ops'] as const satisfies readonly TeamRole[]
 
@@ -189,20 +193,48 @@ function ContinueTeamButton({ team, source, onStarted }: { team: { id: string; t
   const { t, call, navigate, notify } = usePanel()
   const [open, setOpen] = useState(false)
   const [instruction, setInstruction] = useState('')
+  const [images, setImages] = useState<PendingImage[]>([])
+  const [reading, setReading] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const close = (): void => { setOpen(false); setImages([]) }
+  const addFiles = async (files: FileList | null): Promise<void> => {
+    if (!files?.length) { setReading(false); return }
+    const accepted: PendingImage[] = []
+    for (const file of [...files]) {
+      if (!CONTINUATION_IMAGE_TYPES.includes(file.type as typeof CONTINUATION_IMAGE_TYPES[number])) {
+        notify(t('teamContinueImageType')); continue
+      }
+      if (file.size > MAX_CONTINUATION_IMAGE_BYTES) { notify(t('teamContinueImageTooLarge')); continue }
+      if (images.length + accepted.length >= MAX_CONTINUATION_IMAGES) { notify(t('teamContinueImageLimit')); break }
+      const preview = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+        reader.onerror = () => reject(reader.error ?? new Error('Could not read the image'))
+        reader.readAsDataURL(file)
+      }).catch(() => { notify(t('teamContinueImageUnreadable')); return '' })
+      if (!preview) continue
+      accepted.push({ mediaType: file.type as TeamImageUpload['mediaType'], name: file.name,
+        data: preview.slice(preview.indexOf(',') + 1), preview })
+    }
+    if (accepted.length) setImages(current => [...current, ...accepted].slice(0, MAX_CONTINUATION_IMAGES))
+    setReading(false)
+  }
   const start = useAction(async () => {
     const text = instruction.trim()
-    const body = text ? { instruction: text } : {}
+    const body = { ...text ? { instruction: text } : {},
+      ...images.length ? { images: images.map(({ mediaType, data, name }) => ({ mediaType, data, name })) } : {} }
     let started: Team
     try {
       started = (await call('POST teams/:id/continue', { id: team.id, body })).team
     } catch (failure) {
       if (!isUnknownOperation(failure)) throw failure
+      if (images.length) notify(t('teamContinueLegacyImages'))
       // Keep an already running older host usable: carry the source evidence inside a normal new team task.
       const previous = source ?? await call('GET teams/:id', { id: team.id })
       started = (await call('POST teams', { body: { task: legacyContinuationTask(previous, text),
         title: `${previous.title} · ${t('teamContinued')}`.slice(0, 120), directory: previous.directory } })).team
     }
-    setOpen(false); setInstruction('')
+    setOpen(false); setInstruction(''); setImages([])
     await onStarted?.()
     notify(t('teamContinueSent', { count: started.continuation_recipients?.length ?? TEAM_ROLES.length }))
     navigate({ page: 'team', id: started.id })
@@ -210,16 +242,39 @@ function ContinueTeamButton({ team, source, onStarted }: { team: { id: string; t
   const fieldId = `dt-team-continue-${team.id}`
   return <>
     <Button variant="outline" size="sm" icon={<Icon name="play" size={14} />} onClick={() => setOpen(true)}>{t('teamContinue')}</Button>
-    <Modal open={open} onClose={() => setOpen(false)} title={t('teamContinueTitle')} closeLabel={t('close')}
+    <Modal open={open} onClose={close} title={t('teamContinueTitle')} closeLabel={t('close')}
       description={t('teamContinueHint')}
       footer={<>
-        <Button variant="ghost" onClick={() => setOpen(false)}>{t('cancel')}</Button>
-        <Button variant="primary" disabled={start.busy} onClick={() => { void start.run() }}>{t('teamContinueStart')}</Button>
+        <Button variant="ghost" onClick={close}>{t('cancel')}</Button>
+        <Button variant="primary" disabled={start.busy || reading} onClick={() => { void start.run() }}>{t('teamContinueStart')}</Button>
       </>}>
       <div className="dt-field">
         <label htmlFor={fieldId}>{t('teamContinuation')}</label>
         <textarea id={fieldId} className="dt-textarea" rows={4} value={instruction}
-          placeholder={t('teamContinuePlaceholder')} onChange={event => setInstruction(event.target.value)} />
+          placeholder={t('teamContinuePlaceholder')} onChange={event => setInstruction(event.target.value)}
+          onPaste={event => {
+            if (!event.clipboardData.files.length) return
+            event.preventDefault(); setReading(true); void addFiles(event.clipboardData.files)
+          }} />
+      </div>
+      <div className="dt-field">
+        <label>{t('teamContinueImages')}</label>
+        <div className="dt-team-attachments">
+          {images.map((image, index) => <div className="dt-team-attachment" key={`${image.name}-${index}`}>
+            <img src={image.preview} alt={image.name} />
+            <button type="button" className="dt-team-attachment-remove" aria-label={t('teamContinueRemoveImage')}
+              title={t('teamContinueRemoveImage')} onClick={() => setImages(current => current.filter((_, at) => at !== index))}>
+              <Icon name="close" size={12} />
+            </button>
+          </div>)}
+          {images.length < MAX_CONTINUATION_IMAGES && <button type="button" className="dt-team-attachment-add"
+            disabled={reading} onClick={() => fileInput.current?.click()}>
+            <Icon name="plus" size={16} />{t('teamContinueAttach')}
+          </button>}
+        </div>
+        <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden
+          onChange={event => { setReading(true); void addFiles(event.target.files); event.target.value = '' }} />
+        <div className="dt-hint">{t('teamContinueImagesHint')}</div>
       </div>
     </Modal>
   </>

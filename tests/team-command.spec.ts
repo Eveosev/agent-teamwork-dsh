@@ -118,11 +118,15 @@ describe('/team', () => {
     expect(team.directory).toBe('/tmp/api-team')
     expect((await host.api('GET', `teams/${team.id}`)).body).toMatchObject({ task: 'API task', directory: '/tmp/api-team' })
     await vi.waitFor(() => expect(host.runtime.teams.get(team.id)?.state).toBe('done'))
-    const continued = await host.api('POST', `teams/${team.id}/continue`, { instruction: 'Finish the remaining check' })
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lYz3WQAAAABJRU5ErkJggg=='
+    const continued = await host.api('POST', `teams/${team.id}/continue`, { instruction: 'Finish the remaining check',
+      images: [{ mediaType: 'image/png', data: png, name: 'shot.png' }] })
     expect(continued.status).toBe(200)
     expect(continued.body.team).toMatchObject({ id: team.id, task: 'API task', directory: '/tmp/api-team',
       continuations: 1, continuation: 'Finish the remaining check' })
     await vi.waitFor(() => expect(host.runtime.teams.list()[0]?.state).toBe('done'))
+    expect(prompts().slice(7)).toHaveLength(7)
+    for (const prompt of prompts().slice(7)) expect(prompt.at(-1)).toMatchObject({ type: 'image' })
     expect(host.runtime.teams.list()).toHaveLength(1)
     expect(host.runtime.teams.list()[0]?.id).toBe(team.id)
     expect((await host.api('GET', 'teams/missing')).status).toBe(404)

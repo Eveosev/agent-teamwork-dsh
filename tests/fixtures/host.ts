@@ -255,7 +255,11 @@ export async function startRuntime(seed?: (store: Store) => void) {
   const llm = { resolveCallConfig: vi.fn(async (value: unknown) => value),
     resolveModelInfo: vi.fn(async (_provider: string, _model: string, _signal?: AbortSignal): Promise<{ inputModalities?: readonly string[] }> =>
       ({ inputModalities: ['text', 'image'] })) }
-  const services = { agents, commands, llm, sessionController: controller,
+  // Continuation image uploads are admitted by the real route before reaching the prompts; the fake keeps the ordering.
+  const attachments = { admitPromptContent: vi.fn(async (parts: readonly { type: string; name?: string }[]) => parts.map(part =>
+    part.type === 'image' ? { type: 'image', attachment: { attachmentId: part.name ?? 'admitted', mediaType: 'image/png',
+      bytes: 1, width: 1, height: 1 } } : part)) }
+  const services = { agents, commands, llm, attachments, sessionController: controller,
     sessionPersistence: persistence, workspaceRegistry: { create: async (cwd: string) => ({ id: cwd }) }, permissionPresets: { set: () => {} }, subprocess, webServer,
     jobs: jobs.service, subagents: subagents.service }
   const ctx = new Context()

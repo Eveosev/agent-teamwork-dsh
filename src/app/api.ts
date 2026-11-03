@@ -17,6 +17,9 @@ export const TEAM_FILTERS = ['verify', 'running', 'done', 'all'] as const
 export type TicketFilter = typeof TICKET_FILTERS[number]
 export type ThreadFilter = typeof THREAD_FILTERS[number]
 export type TeamFilter = typeof TEAM_FILTERS[number]
+/** Browser image upload accepted by a Team continuation; data is canonical base64 without a data URL prefix. */
+export const TEAM_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+export type TeamImageUpload = { mediaType: typeof TEAM_IMAGE_TYPES[number]; data: string; name?: string }
 interface Paged { offset?: number; limit?: number }
 /** Whether a context update was already injected into the main Session or is still pending delivery. */
 type Delivery = 'injected' | 'pending'
@@ -38,7 +41,7 @@ export interface Api {
   'GET teams/:id': { response: Team }
   'GET teams/:id/file': { query: { path: string }; response: TeamFile }
   'POST teams': { body: { task: string; title?: string; directory?: string }; response: { team: Team } }
-  'POST teams/:id/continue': { body: { instruction?: string }; response: { team: Team } }
+  'POST teams/:id/continue': { body: { instruction?: string; images?: TeamImageUpload[] }; response: { team: Team } }
   'POST teams/:id/stop': { response: { stopped: boolean } }
   'GET tickets': { query?: Paged & { state?: TicketFilter }; response: TicketListView }
   'GET tickets/:id': { response: TicketPageView }

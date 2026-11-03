@@ -83,7 +83,8 @@ describe('Teams', () => {
     const first = teams.create('Finish the Chrome extension', parent)
     await vi.waitFor(() => expect(teams.get(first.id)?.state).toBe('done'))
     const before = teams.get(first.id)!
-    const next = teams.continueTeam(first.id, parent, 'Fix the remaining tab grouping issue')
+    const shots = [image('continuation-shot')]
+    const next = teams.continueTeam(first.id, parent, 'Fix the remaining tab grouping issue', shots)
     expect(next.id).toBe(first.id)
     await vi.waitFor(() => expect(teams.get(first.id)?.state).toBe('done'))
     const stored = teams.get(first.id)!
@@ -95,6 +96,7 @@ describe('Teams', () => {
     expect(teams.list()).toHaveLength(1)
     expect(teams.list()[0]?.id).toBe(first.id)
     expect(runs).toHaveLength(14)
+    for (const run of runs.slice(7)) expect(run.blocks.slice(1)).toEqual(shots)
     expect(runs[7]!.prompt).toContain('Previous attempt evidence:')
     expect(runs[7]!.prompt).toContain(before.summary!)
     expect(runs[7]!.prompt).toContain('Fix the remaining tab grouping issue')

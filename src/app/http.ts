@@ -2,8 +2,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { ImageBlock } from '@deepseek-ai/dsh-llm'
 import { z } from 'zod'
-import { THREAD_FILTERS, TICKET_FILTERS, type Api, type ApiResponse, type RouteParams } from './api.ts'
+import { TEAM_IMAGE_TYPES, THREAD_FILTERS, TICKET_FILTERS, type Api, type ApiResponse, type RouteParams, type TeamImageUpload } from './api.ts'
 import { sourceSkills } from './context.ts'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInParts, defaultPrompts, savePrompts, type Prompts }
@@ -37,6 +38,8 @@ export interface HttpHost {
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'ensure'>
   readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'continueTeam' | 'stop' | 'activeCount' | 'readFile'>
+  /** Admits browser image uploads into durable attachment references for a Team continuation. */
+  admitImages(images: readonly TeamImageUpload[]): Promise<ImageBlock[]>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount'>
@@ -151,7 +154,10 @@ const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), Sou
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
 const TeamCreateRequest = z.object({ task: z.string().trim().min(1).max(8000), title: z.string().trim().max(120).optional(),
   directory: z.string().trim().min(1).optional() }).strict()
-const TeamContinueRequest = z.object({ instruction: z.string().trim().max(8000).optional() }).strict()
+const TeamImage = z.object({ mediaType: z.enum(TEAM_IMAGE_TYPES), data: z.string().min(1).max(12_000_000),
+  name: z.string().trim().max(200).optional() }).strict()
+const TeamContinueRequest = z.object({ instruction: z.string().trim().max(8000).optional(),
+  images: z.array(TeamImage).max(8).optional() }).strict()
 const TeamFileQuery = z.object({ path: z.string().trim().min(1).max(4096) }).strict()
 
 function routes(runtime: HttpHost): Routes {
@@ -211,14 +217,15 @@ function routes(runtime: HttpHost): Routes {
     },
     'POST teams/:id/continue': async ({ params, body }) => {
       const source = team(params.id)
-      const request = TeamContinueRequest.parse(await body())
+      const request = TeamContinueRequest.parse(await body(48 * 1024 * 1024))
       const settings = store.settings()
       if (settings.paused) throw new RouteError(400, 'Processing is paused; resume it before continuing a team')
       if (source.state === 'running') throw new RouteError(400, 'Team is still running; wait for it to finish before continuing')
       const limit = Math.min(3, Math.max(1, settings.executor.maxWorkers))
       if (runtime.teams.activeCount >= limit) throw new RouteError(400, `At most ${limit} teams run at once; wait for one to finish`)
       const agent = await runtime.sessions.ensure(runtime.masterId, runtime.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
-      return { team: runtime.teams.continueTeam(source.id, agent, request.instruction ?? '') }
+      const images = request.images?.length ? await runtime.admitImages(request.images) : []
+      return { team: runtime.teams.continueTeam(source.id, agent, request.instruction ?? '', images) }
     },
     'POST teams/:id/stop': ({ params }) => { team(params.id); return { stopped: runtime.teams.stop(params.id) } },
     'GET tickets': ({ query }) => {

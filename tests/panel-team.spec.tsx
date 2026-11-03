@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 // The Team tab: the team list, the start form, a team detail, and stopping a running team.
+import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
 import { usePanel, mount, all, find, tab, click, type, text, field, at } from './fixtures/panel.tsx'
@@ -100,6 +101,23 @@ it('continues a finished team from its page with an optional instruction', async
   expect(text()).toContain(zh.teamContinuationTargets)
   expect(text()).toContain(zh['teamRole.lead'])
   expect(all('.dt-grid3 .dt-card').length).toBe(6)
+})
+
+it('attaches screenshots to a continuation', async () => {
+  at({ page: 'team', id: 'team-2' })
+  await mount()
+  await click(zh.teamContinue)
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]')!
+  const file = new File([Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lYz3WQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0))],
+    'evidence.png', { type: 'image/png' })
+  Object.defineProperty(input, 'files', { value: [file], configurable: true })
+  await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 20)) })
+  await vi.waitFor(() => expect(document.querySelector('.dt-team-attachment img')).not.toBeNull())
+  await click(zh.teamContinueStart)
+  const request = server.requests.find(item => item.method === 'POST' && item.path.endsWith('/continue'))!
+  expect((request.body as { images: { mediaType: string; name: string; data: string }[] }).images)
+    .toMatchObject([{ mediaType: 'image/png', name: 'evidence.png' }])
 })
 
 it('falls back to a plain team when the host predates the continuation route', async () => {

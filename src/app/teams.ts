@@ -191,7 +191,7 @@ export class Teams {
    * Continues a finished team in place: the same card and id are reused, the previous attempt is kept for the prompt and
    * as `previous_summary`, and all six roles run again with the optional instruction. No duplicate Team is created.
    */
-  continueTeam(id: string, parent?: Agent, instruction = ''): Team {
+  continueTeam(id: string, parent?: Agent, instruction = '', images: readonly ImageBlock[] = []): Team {
     const source = this.get(id)
     if (!source) throw new Error(`Team not found: ${id}`)
     if (source.state === 'running') throw new Error('Team is still running; wait for it to finish before continuing')
@@ -219,7 +219,7 @@ export class Teams {
     source.members = TEAM_ROLES.map(role => ({ role, profile: profiles[role] ? role : settings.executor.defaultProfile ?? null, state: 'idle' }))
     this.save(source)
     this.moveToEnd(source.id)
-    this.launch(source, agent, [], { source: previous, instruction: text })
+    this.launch(source, agent, images, { source: previous, instruction: text })
     return source
   }
 
