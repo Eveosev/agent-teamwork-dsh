@@ -2,7 +2,7 @@
 import { useState, type FormEvent } from 'react'
 import type { ApiResponse } from '../app/api.ts'
 import { ApiError, usePoll } from './api.ts'
-import { Button, Dot, Icon, InfoTip, Input, Tag, type DotState, type TagTone } from './controls.tsx'
+import { Button, Dot, Icon, InfoTip, Input, Modal, Tag, type DotState, type TagTone } from './controls.tsx'
 import { useAction, usePanel } from './provider.tsx'
 import { valueLabel, type T } from './text.ts'
 import { ConfirmButton, Hint, LabelValue, LoadState, MarkdownLite, PageHead, Section, SessionButton, When } from './widgets.tsx'
@@ -179,6 +179,31 @@ export function TeamStatus() {
   </>
 }
 
+/** A collapsed, clickable reading card for the final summary; the full Markdown opens in a dialog. */
+function TeamSummaryCard({ text }: { text: string }) {
+  const { t } = usePanel()
+  const [open, setOpen] = useState(false)
+  const long = text.length > 600
+  return <>
+    <div className="dt-summary-card" role="button" tabIndex={0} aria-haspopup="dialog" aria-label={t('teamSummaryRead')}
+      onClick={() => setOpen(true)}
+      onKeyDown={event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        setOpen(true)
+      }}>
+      <div className={long ? 'dt-summary-preview dt-summary-preview-fade' : 'dt-summary-preview'}>
+        <MarkdownLite text={text} links={false} />
+      </div>
+      <span className="dt-summary-more">{t('teamSummaryRead')}<Icon name="chevron-right" size={12} /></span>
+    </div>
+    <Modal open={open} onClose={() => setOpen(false)} title={t('teamSummary')} closeLabel={t('close')}
+      className="dt-summary-modal">
+      <div className="dt-summary-body"><MarkdownLite text={text} /></div>
+    </Modal>
+  </>
+}
+
 /** Team detail: state and duration, the task, six role cards, and the lead's final summary. */
 export function TeamPage({ id }: { id: string }) {
   const { t, call } = usePanel()
@@ -210,6 +235,6 @@ export function TeamPage({ id }: { id: string }) {
     <Section title={t('teamMembers')} count={TEAM_ROLES.length}>
       <div className="dt-grid3">{TEAM_ROLES.map(role => <MemberCard key={role} team={data} role={role} />)}</div>
     </Section>
-    {data.summary && <Section title={t('teamSummary')}><MarkdownLite text={data.summary} /></Section>}
+    {data.summary && <Section title={t('teamSummary')}><TeamSummaryCard text={data.summary} /></Section>}
   </>
 }

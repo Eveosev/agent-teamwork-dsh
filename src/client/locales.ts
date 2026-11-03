@@ -429,6 +429,7 @@ const TEXT = {
   teamError: ['错误', 'Error'],
   teamOutput: ['输出', 'Output'],
   teamSummary: ['最终总结', 'Final summary'],
+  teamSummaryRead: ['阅读全文', 'Read full summary'],
   teamNotFound: ['找不到这个团队。', 'Team not found.'],
   teamStopTitle: ['停止团队', 'Stop team'],
   teamStopConfirm: ['停止团队“{title}”及其所有成员？已完成的输出会保留。', 'Stop “{title}” and all its members? Completed output is kept.'],

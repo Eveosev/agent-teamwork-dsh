@@ -79,6 +79,22 @@ it('shows the final summary of a finished team without a stop action', async () 
   expect(all('button').some(button => button.textContent === zh.stop)).toBe(false)
 })
 
+it('opens the collapsed final summary in a Markdown reading dialog', async () => {
+  at({ page: 'team', id: 'team-2' })
+  await mount()
+  const card = document.querySelector<HTMLElement>('.dt-summary-card')!
+  expect(card.getAttribute('aria-haspopup')).toBe('dialog')
+  expect(card.textContent).toContain(zh.teamSummaryRead)
+  expect(document.querySelector('.dt-summary-preview .dt-md-table')).not.toBeNull()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  await click(card)
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
+  expect(dialog.getAttribute('aria-label')).toBe(zh.teamSummary)
+  expect(dialog.querySelector('.dt-md-table')).not.toBeNull()
+  await click(find(zh.close))
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+})
+
 it('explains /team and the six roles when there are no teams', async () => {
   server.teams = { items: [], details: {} }
   await mount()
