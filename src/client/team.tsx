@@ -104,7 +104,7 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
           return <Dot key={role} state={stateDot(state)} label={`${roleLabel(t, role)} · ${memberLabel(t, state)}`} />
         })}</span>
       </div>
-      {team.summary && <div className="dt-row-quote">{team.summary}</div>}
+      {team.summary && <div className="dt-row-quote"><MarkdownLite text={team.summary} /></div>}
     </div>
     {running && <div className="dt-row-actions">
       <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
