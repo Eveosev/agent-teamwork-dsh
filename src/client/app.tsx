@@ -155,7 +155,7 @@ function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab
         paused={!!state?.paused} />
       case 'execution': return route.id !== undefined ? <TicketPage key={route.id} id={route.id} />
         : state ? <ExecutionStatus filter={route.query?.filter ?? 'open'} state={state} reload={reload} /> : waiting
-      case 'team': return route.id !== undefined ? <TeamPage key={route.id} id={route.id} /> : <TeamStatus />
+      case 'team': return route.id !== undefined ? <TeamPage key={route.id} id={route.id} /> : <TeamStatus filter={route.query?.filter ?? 'all'} />
       case 'settings': return state ? <SettingsPage key={state.masterId} group={route.query.group} query={route.query} state={state}
         deploymentForm={deploymentForm} /> : waiting
     }

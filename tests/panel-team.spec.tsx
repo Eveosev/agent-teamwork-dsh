@@ -38,6 +38,22 @@ it('lists teams with their state, progress and member dots, and opens the six ro
   expect(server.opened).toContain('team-lead')
 })
 
+it('filters teams by done, to verify, running and all', async () => {
+  server.teams.items[1]!.outcome = 'unverified'
+  await mount()
+  await click(tab(zh['tab.team']))
+  expect(all('.dt-list .dt-row-title').map(title => title.textContent)).toEqual(['修复登录页回归', '发布检查'])
+  await click(find(zh['teamFilter.running']))
+  expect(all('.dt-list .dt-row-title').map(title => title.textContent)).toEqual(['修复登录页回归'])
+  await click(find(zh['teamFilter.verify']))
+  expect(all('.dt-list .dt-row-title').map(title => title.textContent)).toEqual(['发布检查'])
+  await click(find(zh['teamFilter.done']))
+  expect(all('.dt-list .dt-row-title')).toHaveLength(0)
+  expect(text()).toContain(zh.none)
+  await click(find(zh['teamFilter.all']))
+  expect(all('.dt-list .dt-row-title').map(title => title.textContent)).toEqual(['修复登录页回归', '发布检查'])
+})
+
 it('starts a team from the form and opens the new team', async () => {
   await mount()
   await click(tab(zh['tab.team']))

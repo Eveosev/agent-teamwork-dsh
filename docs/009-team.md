@@ -69,6 +69,10 @@ A Team record holds the task, title, timestamps, parent Session, each member's p
 
 The team output is evidence for a person, not an automatic merge: review the summary, the child Sessions and the diff before shipping.
 
+## Team list filters
+
+The Team tab filters the list into **Done**, **To verify**, **Running** and **ALL**. *Done* means a finished team whose outcome is `achieved`; *To verify* collects terminal teams that are not achieved (including legacy records without an outcome, `unverified`, `not_achieved`, failed and stopped teams); *Running* is the live state; *ALL* shows every record. The selected filter is kept in the panel route.
+
 ## Continuing a finished team
 
 A terminal team (done, failed or stopped) has a **继续执行** / **Continue** entry in the panel list and detail page. It opens a dialog for an optional instruction and starts a new, linked run with the same task, title and working directory. The original record is not reopened or rewritten: its outcome, summary, members and token usage stay available for audit.

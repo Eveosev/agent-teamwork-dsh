@@ -1,8 +1,8 @@
 /** Team list with a start form and team detail with the six role cards, member sessions, outputs and final summary. */
 import { useState, type FormEvent } from 'react'
-import type { ApiResponse } from '../app/api.ts'
+import { TEAM_FILTERS, type ApiResponse, type TeamFilter } from '../app/api.ts'
 import { ApiError, usePoll } from './api.ts'
-import { Button, Dot, Icon, InfoTip, Input, Modal, Tag, type DotState, type TagTone } from './controls.tsx'
+import { Button, Dot, Icon, InfoTip, Input, Modal, Pill, Tag, type DotState, type TagTone } from './controls.tsx'
 import { useAction, usePanel } from './provider.tsx'
 import { valueLabel, type T } from './text.ts'
 import { ConfirmButton, Hint, LabelValue, LoadState, MarkdownLite, PageHead, Section, SessionButton, When } from './widgets.tsx'
@@ -31,6 +31,9 @@ const outcomeLabel = (t: T, outcome: TeamOutcome): string => outcome === 'achiev
   : outcome === 'not_achieved' ? t('teamOutcome.not_achieved') : t('teamOutcome.unverified')
 const outcomeTone = (outcome: TeamOutcome): TagTone => outcome === 'achieved' ? 'success'
   : outcome === 'not_achieved' ? 'danger' : 'warning'
+/** The filter bucket a team belongs to; legacy done records without an outcome need verification. */
+const teamBucket = (team: TeamSummary): TeamFilter => team.state === 'running' ? 'running'
+  : team.state === 'done' && team.outcome === 'achieved' ? 'done' : 'verify'
 /** Older records finished before outcome markers existed; without evidence they are unverified, never implicitly successful. */
 const shownOutcome = (state: TeamState, outcome: TeamOutcome | undefined): TeamOutcome | undefined =>
   outcome ?? (state === 'done' ? 'unverified' : undefined)
@@ -219,7 +222,7 @@ function ContinueTeamButton({ team, source }: { team: { id: string; title: strin
 }
 
 /** Team tab root: the active team count, a compact start form, and every team newest first. */
-export function TeamStatus() {
+export function TeamStatus({ filter }: { filter: TeamFilter }) {
   const { t, call, navigate } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET teams'), [])
   const [task, setTask] = useState('')
@@ -237,6 +240,7 @@ export function TeamStatus() {
     if (!task.trim() || create.busy) return
     void create.run()
   }
+  const visible = data?.items.filter(team => filter === 'all' || teamBucket(team) === filter) ?? []
   return <>
     <div className="dt-status-head">
       <h2 className="dt-status-title">{t('teamTitle')}<InfoTip text={t('teamIntro')} /></h2>
@@ -265,9 +269,15 @@ export function TeamStatus() {
           disabled={create.busy || !task.trim()}>{t('teamStart')}</Button>
       </div>
     </form>
+    <div className="dt-filters">
+      {TEAM_FILTERS.map(value => <Pill key={value} active={filter === value}
+        onClick={() => navigate({ page: 'team', query: value === 'all' ? {} : { filter: value } }, true)}>
+        {t(`teamFilter.${value}`)}
+      </Pill>)}
+    </div>
     <LoadState error={error} loading={!data} />
-    {data && (data.items.length ? <ul className="dt-list">{data.items.map(team => <TeamLine key={team.id} team={team}
-      reload={reload} />)}</ul> : <div className="dt-section">
+    {data && (visible.length ? <ul className="dt-list">{visible.map(team => <TeamLine key={team.id} team={team}
+      reload={reload} />)}</ul> : data.items.length ? <Hint>{t('none')}</Hint> : <div className="dt-section">
       <Hint>{t('teamEmpty')}</Hint>
       <div className="dt-actions">{TEAM_ROLES.map(role => <Tag key={role} tone="neutral">{roleLabel(t, role)}</Tag>)}</div>
     </div>)}
