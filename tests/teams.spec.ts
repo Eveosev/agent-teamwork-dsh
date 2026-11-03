@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SettingsSchema, type Settings } from '../src/policy.ts'
 import { Teams, TEAM_ROLES, type TeamsHost } from '../src/app/teams.ts'
+import { KV } from '../src/kv.ts'
 
 const settings = (paused = false) => SettingsSchema.parse({ paused, executor: { profiles: {
   lead: { model: { provider: 'anthropic-gateway', model: 'claude-opus-5-5' }, instructions: 'Lead carefully.' },
@@ -46,7 +47,7 @@ function bench(options: { paused?: boolean; pending?: boolean; modalities?: read
   const host: TeamsHost = { context: context as never, masterId: 'master', stateDir: '/tmp/team-state',
     settings: () => options.custom ?? settings(options.paused), logger: { warn: () => {} }, store: { get: key => values.get(key) as never,
       set: (key, value) => { values.set(key, value) }, atomic: <T>(run: () => T) => run() } }
-  return { teams: new Teams(host), runs, subagents, llm }
+  return { teams: new Teams(host), runs, subagents, llm, store: host.store }
 }
 const parent = { id: 'master' } as never
 /** A model-visible image block; the bench never inspects its bytes, only where it lands in each prompt. */
@@ -75,26 +76,41 @@ describe('Teams', () => {
     expect(teams.activeCount).toBe(0)
   })
 
-  it('continues a finished team with its previous evidence and keeps the original record', async () => {
+  it('continues a finished team in place with its previous evidence', async () => {
     const { teams, runs } = bench()
     const first = teams.create('Finish the Chrome extension', parent)
     await vi.waitFor(() => expect(teams.get(first.id)?.state).toBe('done'))
     const before = teams.get(first.id)!
     const next = teams.continueTeam(first.id, parent, 'Fix the remaining tab grouping issue')
-    expect(next.id).not.toBe(first.id)
-    await vi.waitFor(() => expect(teams.get(next.id)?.state).toBe('done'))
-    const source = teams.get(first.id)!
-    const stored = teams.get(next.id)!
-    expect(source).toMatchObject({ state: 'done', outcome: 'achieved', summary: before.summary })
+    expect(next.id).toBe(first.id)
+    await vi.waitFor(() => expect(teams.get(first.id)?.state).toBe('done'))
+    const stored = teams.get(first.id)!
     expect(stored).toMatchObject({ task: first.task, title: first.title, directory: first.directory,
-      continued_from: first.id, continued_from_title: first.title, continuation: 'Fix the remaining tab grouping issue',
-      continuation_recipients: [...TEAM_ROLES], outcome: 'achieved' })
-    expect(teams.list()[0]?.id).toBe(next.id)
+      continuations: 1, previous_summary: before.summary, previous_outcome: 'achieved',
+      continuation: 'Fix the remaining tab grouping issue', continuation_recipients: [...TEAM_ROLES], outcome: 'achieved' })
+    expect(stored.continued_from).toBeUndefined()
+    expect(stored.summary).toContain('Team lead result')
+    expect(teams.list()).toHaveLength(1)
+    expect(teams.list()[0]?.id).toBe(first.id)
     expect(runs).toHaveLength(14)
     expect(runs[7]!.prompt).toContain('Previous attempt evidence:')
+    expect(runs[7]!.prompt).toContain(before.summary!)
     expect(runs[7]!.prompt).toContain('Fix the remaining tab grouping issue')
     expect(runs[9]!.prompt).toContain('instead of starting over')
     for (const run of runs.slice(7)) expect(run.prompt).toContain('Fix the remaining tab grouping issue')
+  })
+
+  it('shows only the latest card in a legacy continuation lineage', async () => {
+    const { teams, store } = bench()
+    const parentTeam = teams.create('Legacy parent', parent)
+    await vi.waitFor(() => expect(teams.get(parentTeam.id)?.state).toBe('done'))
+    const child = teams.create('Legacy child', parent)
+    await vi.waitFor(() => expect(teams.get(child.id)?.state).toBe('done'))
+    const record = teams.get(child.id)!
+    record.continued_from = parentTeam.id
+    store.set(KV.teams.record(child.id), record)
+    expect(teams.list().map(team => team.id)).toEqual([child.id])
+    expect(teams.get(parentTeam.id)).toBeDefined()
   })
 
   it('refuses to continue a running team or an unknown team', async () => {

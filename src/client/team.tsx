@@ -160,7 +160,9 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
       <div className="dt-row-meta">
         <Tag tone={teamTone(team.state)}>{teamStateLabel(t, team.state)}</Tag>
         <OutcomeTag state={team.state} outcome={team.outcome} />
-        {team.continued_from && <Tag tone="info" title={`${t('teamContinuedFrom')}: ${team.continued_from_title ?? team.continued_from}`}>{t('teamContinued')}</Tag>}
+        {(team.continued_from || team.continuations) && <Tag tone="info"
+          title={team.continued_from ? `${t('teamContinuedFrom')}: ${team.continued_from_title ?? team.continued_from}` : t('teamContinued')}>
+          {team.continuations && team.continuations > 1 ? t('teamContinuedTimes', { count: team.continuations }) : t('teamContinued')}</Tag>}
         <LabelValue label={t('teamProgress')} value={`${doneCount(team.members)}/${TEAM_ROLES.length}`} />
         <LabelValue label={t('teamCreated')} value={<When at={team.created_at} />} />
         {team.rounds && <LabelValue label={t('teamRounds')} value={team.rounds} />}
@@ -176,13 +178,14 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
       {running ? <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
         message={t('teamStopConfirm', { title: team.title })}
         onConfirm={async () => { await call('POST teams/:id/stop', { id: team.id }); await reload() }} />
-        : <ContinueTeamButton team={team} />}
+        : <ContinueTeamButton team={team} onStarted={reload} />}
     </div>
   </li>
 }
 
 /** Start a linked run from a finished team; the source record stays intact. */
-function ContinueTeamButton({ team, source }: { team: { id: string; title: string }; source?: Team }) {
+function ContinueTeamButton({ team, source, onStarted }: { team: { id: string; title: string }; source?: Team
+  onStarted?: () => Promise<void> | void }) {
   const { t, call, navigate, notify } = usePanel()
   const [open, setOpen] = useState(false)
   const [instruction, setInstruction] = useState('')
@@ -200,6 +203,7 @@ function ContinueTeamButton({ team, source }: { team: { id: string; title: strin
         title: `${previous.title} · ${t('teamContinued')}`.slice(0, 120), directory: previous.directory } })).team
     }
     setOpen(false); setInstruction('')
+    await onStarted?.()
     notify(t('teamContinueSent', { count: started.continuation_recipients?.length ?? TEAM_ROLES.length }))
     navigate({ page: 'team', id: started.id })
   })
@@ -309,8 +313,9 @@ export function TeamPage({ id }: { id: string }) {
       <LabelValue label={t('teamProgress')} value={`${doneCount(data.members)}/${TEAM_ROLES.length}`} />
       <LabelValue label={t('teamCreated')} value={<When at={data.created_at} />} />
       <LabelValue label={running ? t('teamRunningFor') : t('teamDuration')}
-        value={durationText(t, data.created_at, end)} />
+        value={durationText(t, data.run_started_at ?? data.created_at, end)} />
       {data.rounds && <LabelValue label={t('teamRounds')} value={data.rounds} />}
+      {data.continuations && <LabelValue label={t('teamContinued')} value={data.continuations} />}
       {data.usage && <TokenUsageLine usage={data.usage} />}
       {data.continued_from && <LabelValue label={t('teamContinuedFrom')} value={
         <button type="button" className="dt-inline-button" onClick={() => navigate({ page: 'team', id: data.continued_from! })}>
@@ -319,7 +324,7 @@ export function TeamPage({ id }: { id: string }) {
       {running ? <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
         message={t('teamStopConfirm', { title: data.title })}
         onConfirm={async () => { await call('POST teams/:id/stop', { id }); await reload() }} />
-        : <ContinueTeamButton team={data} source={data} />}
+        : <ContinueTeamButton team={data} source={data} onStarted={reload} />}
     </div>
     {data.error && <p className="dt-banner dt-danger dt-mono">
       <span className="dt-banner-label">{t('teamError')}{t('labelSeparator')}</span>{data.error}
@@ -331,6 +336,11 @@ export function TeamPage({ id }: { id: string }) {
       <div className="dt-tag-group">{data.continuation_recipients.map(role =>
         <Tag key={role} tone="neutral">{roleLabel(t, role)}</Tag>)}</div>
       {!data.continuation && <div className="dt-hint">{t('teamContinuationNone')}</div>}
+    </Section>}
+    {data.previous_summary && <Section title={t('teamPreviousAttempt')}>
+      {data.previous_outcome && <div className="dt-tag-group"><OutcomeTag state="done" outcome={data.previous_outcome} /></div>}
+      <ReadingCard kind="summary" text={data.previous_summary} title={`${t('teamPreviousAttempt')}${t('labelSeparator')}${t('teamSummary')}`}
+        action={t('teamSummaryRead')} />
     </Section>}
     <Section title={t('teamMembers')} count={TEAM_ROLES.length}>
       <div className="dt-grid3">{TEAM_ROLES.map(role => <MemberCard key={role} team={data} role={role} />)}</div>

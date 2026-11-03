@@ -120,10 +120,11 @@ describe('/team', () => {
     await vi.waitFor(() => expect(host.runtime.teams.get(team.id)?.state).toBe('done'))
     const continued = await host.api('POST', `teams/${team.id}/continue`, { instruction: 'Finish the remaining check' })
     expect(continued.status).toBe(200)
-    expect(continued.body.team).toMatchObject({ task: 'API task', directory: '/tmp/api-team', continued_from: team.id,
-      continued_from_title: 'API team', continuation: 'Finish the remaining check' })
+    expect(continued.body.team).toMatchObject({ id: team.id, task: 'API task', directory: '/tmp/api-team',
+      continuations: 1, continuation: 'Finish the remaining check' })
     await vi.waitFor(() => expect(host.runtime.teams.list()[0]?.state).toBe('done'))
-    expect(host.runtime.teams.list()).toHaveLength(2)
+    expect(host.runtime.teams.list()).toHaveLength(1)
+    expect(host.runtime.teams.list()[0]?.id).toBe(team.id)
     expect((await host.api('GET', 'teams/missing')).status).toBe(404)
     const settings = host.runtime.store.settings()
     host.runtime.store.saveSettings({ ...settings, paused: true })

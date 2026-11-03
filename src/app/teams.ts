@@ -35,12 +35,13 @@ export interface TeamMember { role: TeamRole; profile: string | null; state: Mem
   started_at?: string; ended_at?: string; round?: number; verdict?: MemberVerdict; usage?: TeamUsage }
 /** A durable team record, listed and inspected by the panel. */
 export interface Team { id: string; title: string; task: string; state: TeamState; created_at: string; updated_at: string
-  parent_session_id: string; directory: string; members: TeamMember[]; summary?: string; error?: string; outcome?: TeamOutcome
-  rounds?: number; usage?: TeamUsage; continued_from?: string; continued_from_title?: string; continuation?: string
-  continuation_recipients?: TeamRole[] }
+  run_started_at?: string; parent_session_id: string; directory: string; members: TeamMember[]; summary?: string; error?: string
+  outcome?: TeamOutcome; rounds?: number; usage?: TeamUsage; continuations?: number; previous_summary?: string
+  previous_outcome?: TeamOutcome; previous_error?: string; continued_from?: string; continued_from_title?: string
+  continuation?: string; continuation_recipients?: TeamRole[] }
 export interface TeamSummary { id: string; title: string; state: TeamState; created_at: string; updated_at: string
-  members: { role: TeamRole; state: MemberState }[]; summary?: string; outcome?: TeamOutcome; rounds?: number; usage?: TeamUsage
-  continued_from?: string; continued_from_title?: string }
+  run_started_at?: string; members: { role: TeamRole; state: MemberState }[]; summary?: string; outcome?: TeamOutcome
+  rounds?: number; usage?: TeamUsage; continuations?: number; continued_from?: string; continued_from_title?: string }
 /** Context carried from a finished team into a new continuation run. */
 interface Continuation { source: Team; instruction: string }
 
@@ -101,13 +102,20 @@ export class Teams {
     context.on?.('session/event', (session, event) => this.observeUsage(session.id, event))
   }
 
-  /** Lists teams newest first, with member states and a short summary. */
+  /**
+   * Lists teams newest first, with member states and a short summary. Descendants of an older continuation are hidden
+   * so one card represents a lineage; the visible latest card links back to its `continued_from` record.
+   */
   list(): TeamSummary[] {
     const ids = [...(this.host.store.get(KV.teams.index) ?? [])].reverse()
-    return ids.flatMap(id => { const team = this.get(id); return team ? [{ id: team.id, title: team.title, state: team.state,
-      created_at: team.created_at, updated_at: team.updated_at, members: team.members.map(member => ({ role: member.role,
+    const linked = new Set(ids.flatMap(id => { const team = this.get(id); return team?.continued_from && ids.includes(team.continued_from)
+      ? [team.continued_from] : [] }))
+    return ids.filter(id => !linked.has(id)).flatMap(id => { const team = this.get(id); return team ? [{ id: team.id, title: team.title, state: team.state,
+      created_at: team.created_at, updated_at: team.updated_at, ...team.run_started_at ? { run_started_at: team.run_started_at } : {},
+      members: team.members.map(member => ({ role: member.role,
         state: member.state })), ...team.summary ? { summary: team.summary } : {}, ...team.outcome ? { outcome: team.outcome } : {},
       ...team.rounds ? { rounds: team.rounds } : {}, ...team.usage ? { usage: team.usage } : {},
+      ...team.continuations ? { continuations: team.continuations } : {},
       ...team.continued_from ? { continued_from: team.continued_from } : {},
       ...team.continued_from_title ? { continued_from_title: team.continued_from_title } : {} }] : [] })
   }
@@ -146,41 +154,83 @@ export class Teams {
     return this.start(task, parent, title, requestedDirectory, images)
   }
 
-  /** Starts a linked run from a finished team, using its task, title, directory and evidence, plus an optional instruction. */
+  /**
+   * Continues a finished team in place: the same card and id are reused, the previous attempt is kept for the prompt and
+   * as `previous_summary`, and all six roles run again with the optional instruction. No duplicate Team is created.
+   */
   continueTeam(id: string, parent?: Agent, instruction = ''): Team {
     const source = this.get(id)
     if (!source) throw new Error(`Team not found: ${id}`)
     if (source.state === 'running') throw new Error('Team is still running; wait for it to finish before continuing')
-    return this.start(source.task, parent, source.title, source.directory, [], { source, instruction: instruction.trim() })
+    const { agent, settings } = this.ready(parent)
+    const directory = resolve(source.directory)
+    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    if (!statSync(directory).isDirectory()) throw new Error(`Team directory is not a directory: ${directory}`)
+    const previous = structuredClone(source)
+    const priorSummary = source.summary ?? source.previous_summary
+    const priorOutcome = source.outcome ?? source.previous_outcome
+    const priorError = source.error ?? source.previous_error
+    previous.summary = priorSummary
+    previous.outcome = priorOutcome
+    const text = instruction.trim()
+    const at = new Date().toISOString()
+    source.state = 'running'; source.updated_at = at; source.run_started_at = at; source.parent_session_id = agent.id
+    source.directory = directory; source.continuations = (source.continuations ?? 0) + 1
+    source.continuation_recipients = [...TEAM_ROLES]
+    if (text) source.continuation = text; else delete source.continuation
+    delete source.outcome; delete source.error; delete source.summary; delete source.rounds; delete source.usage
+    if (priorSummary) source.previous_summary = priorSummary; else delete source.previous_summary
+    if (priorOutcome) source.previous_outcome = priorOutcome; else delete source.previous_outcome
+    if (priorError) source.previous_error = priorError; else delete source.previous_error
+    const profiles = settings.executor.profiles
+    source.members = TEAM_ROLES.map(role => ({ role, profile: profiles[role] ? role : settings.executor.defaultProfile ?? null, state: 'idle' }))
+    this.save(source)
+    this.moveToEnd(source.id)
+    this.launch(source, agent, [], { source: previous, instruction: text })
+    return source
   }
 
-  private start(task: string, parent: Agent | undefined, title: string, requestedDirectory: string | undefined,
-    images: readonly ImageBlock[], continuation?: Continuation): Team {
+  /** Checks pause, capacity and the parent Session once, for both a new team and an in-place continuation. */
+  private ready(parent?: Agent): { agent: Agent; settings: Settings } {
     const settings = this.host.settings()
     if (settings.paused) throw new Error('Processing is paused; resume it before starting a team')
     const limit = Math.min(MAX_ACTIVE_TEAMS, Math.max(1, settings.executor.maxWorkers))
     if (this.active.size >= limit) throw new Error(`At most ${limit} teams run at once; wait for one to finish`)
     const agent = parent ?? this.host.context.agents.get(this.host.masterId as never)
     if (!agent) throw new Error('The main Session is not running; open it once before starting a team')
+    return { agent, settings }
+  }
+
+  private start(task: string, parent: Agent | undefined, title: string, requestedDirectory: string | undefined,
+    images: readonly ImageBlock[]): Team {
+    const { agent, settings } = this.ready(parent)
     const directory = resolve(requestedDirectory ?? (settings.executor.teamDirectory || join(this.host.stateDir, 'team')))
     mkdirSync(directory, { recursive: true, mode: 0o700 })
     if (!statSync(directory).isDirectory()) throw new Error(`Team directory is not a directory: ${directory}`)
     const at = new Date().toISOString()
-    const id = `team-${key('team', task, agent.id, at, continuation?.source.id ?? '')}`
+    const id = `team-${key('team', task, agent.id, at)}`
     const profiles = settings.executor.profiles
     const team: Team = { id, title: (title.trim() || task.trim().split('\n')[0]!.slice(0, 80)) || 'Agent team', task, state: 'running',
-      created_at: at, updated_at: at, parent_session_id: agent.id, directory, members: TEAM_ROLES.map(role => ({ role,
-        profile: profiles[role] ? role : settings.executor.defaultProfile ?? null, state: 'idle' })),
-      ...continuation ? { continued_from: continuation.source.id, continued_from_title: continuation.source.title,
-        continuation_recipients: [...TEAM_ROLES] } : {},
-      ...continuation?.instruction ? { continuation: continuation.instruction } : {} }
+      created_at: at, updated_at: at, run_started_at: at, parent_session_id: agent.id, directory,
+      members: TEAM_ROLES.map(role => ({ role, profile: profiles[role] ? role : settings.executor.defaultProfile ?? null, state: 'idle' })) }
     this.save(team, true)
+    this.launch(team, agent, images)
+    return team
+  }
+
+  /** Starts execution for an already persisted/updated team and tracks its abort controller. */
+  private launch(team: Team, agent: Agent, images: readonly ImageBlock[], continuation?: Continuation): void {
     const controller = new AbortController()
-    this.active.set(id, controller)
+    this.active.set(team.id, controller)
     void this.execute(team, agent, controller.signal, images, continuation).catch(error => {
       this.finish(team, 'failed', String(error).slice(0, 1000))
-    }).finally(() => { this.active.delete(id) })
-    return team
+    }).finally(() => { this.active.delete(team.id) })
+  }
+
+  /** Moves a continued team to the front of the list without duplicating its index entry. */
+  private moveToEnd(id: string): void {
+    const index = this.host.store.get(KV.teams.index) ?? []
+    if (index.includes(id)) this.host.store.set(KV.teams.index, [...index.filter(item => item !== id), id])
   }
 
   /** Stops a running team and its member activations. Returns whether it was running. */
