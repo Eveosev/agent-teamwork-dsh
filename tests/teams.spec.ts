@@ -9,7 +9,7 @@ const settings = (paused = false) => SettingsSchema.parse({ paused, executor: { 
 
 function bench(options: { paused?: boolean; pending?: boolean; modalities?: readonly string[]; custom?: Settings
   failFirst?: boolean; alwaysFail?: boolean; usage?: { input: number; output: number; cached: number }
-  liveUsage?: { input: number; output: number; cached: number } } = {}) {
+  liveUsage?: { input: number; output: number; cached: number }; badSessions?: boolean } = {}) {
   const values = new Map<string, unknown>()
   const attempts = new Map<string, number>()
   const usageListeners: ((session: { id: string }, event: { type: string; usage?: Record<string, number> }) => void)[] = []
@@ -36,11 +36,14 @@ function bench(options: { paused?: boolean; pending?: boolean; modalities?: read
   }) }
   const llm = { resolveModelInfo: vi.fn(async (_provider: string, _model: string) =>
     options.modalities === undefined ? {} : { inputModalities: options.modalities }) }
-  const sessions = options.usage ? { get: () => ({ snapshotEvents: () => [{ type: 'assistant/message',
-    usage: { inputTokens: options.usage!.input, outputTokens: options.usage!.output, cacheReadTokens: options.usage!.cached } }] }) } : undefined
-  const host: TeamsHost = { context: { subagents, llm, ...sessions ? { sessions } : {},
+  const agents = options.usage ? { get: () => ({ session: { snapshotEvents: () => [{ type: 'assistant/message',
+    usage: { inputTokens: options.usage!.input, outputTokens: options.usage!.output, cacheReadTokens: options.usage!.cached } }] } }) } : undefined
+  const context: Record<string, unknown> = { subagents, llm, ...agents ? { agents } : {},
     ...options.liveUsage ? { on: (_event: string, listener: (session: { id: string }, event: { type: string; usage?: Record<string, number> }) => void) =>
-      usageListeners.push(listener) } : {} } as never, masterId: 'master', stateDir: '/tmp/team-state',
+      usageListeners.push(listener) } : {} }
+  if (options.badSessions) Object.defineProperty(context, 'sessions', {
+    get: () => { throw new Error('cannot get property "sessions" without inject') } })
+  const host: TeamsHost = { context: context as never, masterId: 'master', stateDir: '/tmp/team-state',
     settings: () => options.custom ?? settings(options.paused), logger: { warn: () => {} }, store: { get: key => values.get(key) as never,
       set: (key, value) => { values.set(key, value) }, atomic: <T>(run: () => T) => run() } }
   return { teams: new Teams(host), runs, subagents, llm }
@@ -125,6 +128,14 @@ describe('Teams', () => {
     expect(teams.get(team.id)?.outcome).toBe('not_achieved')
     expect(teams.get(team.id)?.rounds).toBe(3)
     expect(runs).toHaveLength(15)
+  })
+
+  it('does not fail a role when session usage cannot be read', async () => {
+    const { teams } = bench({ badSessions: true })
+    const team = teams.create('Finish without usage fallback', parent)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    expect(teams.get(team.id)).toMatchObject({ state: 'done', outcome: 'achieved' })
+    expect(teams.get(team.id)?.members.every(member => member.state === 'done')).toBe(true)
   })
 
   it('collects token usage from live child session events without double-counting', async () => {

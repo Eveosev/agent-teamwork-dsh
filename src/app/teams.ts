@@ -57,7 +57,7 @@ interface ModelRoute { provider: string; model: string }
 interface UsageEvent { type: string; usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } }
 interface UsageSession { id: string }
 interface SessionEvents { snapshotEvents(): readonly UsageEvent[] }
-interface SessionLookup { get(id: string): SessionEvents | undefined }
+interface AgentLookup { get(id: string): { session: SessionEvents } | undefined }
 
 export interface TeamsHost { context: Context; store: Pick<Store, 'get' | 'set' | 'atomic'>; masterId: string; stateDir: string; settings(): Settings
   logger: { warn(message: string): void } }
@@ -225,13 +225,19 @@ export class Teams {
     this.save(team)
   }
 
-  /** A fallback for a child whose live events were missed; returns undefined when the Session is already gone. */
+  /**
+   * A fallback for a child whose live events were missed. Read the Agent directly: the Cordis `sessions` service is not
+   * injected into this plugin, and touching it throws "cannot get property sessions without inject". Usage accounting
+   * must never fail a role, so any lookup error simply yields no fallback.
+   */
   private snapshotUsage(sessionId: string): TeamUsage | undefined {
-    const sessions = (this.host.context as unknown as { sessions?: SessionLookup }).sessions
-    const events = sessions?.get(sessionId)?.snapshotEvents() ?? []
-    let usage: TeamUsage | undefined
-    for (const event of events) if (event.type === 'assistant/message' && event.usage) usage = addUsage(usage, event.usage)
-    return usage
+    try {
+      const agents = (this.host.context as unknown as { agents?: AgentLookup }).agents
+      const events = agents?.get(sessionId)?.session.snapshotEvents() ?? []
+      let usage: TeamUsage | undefined
+      for (const event of events) if (event.type === 'assistant/message' && event.usage) usage = addUsage(usage, event.usage)
+      return usage
+    } catch { return undefined }
   }
   private finish(team: Team, state: TeamState, error?: string): void {
     team.state = state
