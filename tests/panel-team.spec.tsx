@@ -95,6 +95,18 @@ it('opens the collapsed final summary in a Markdown reading dialog', async () =>
   expect(document.querySelector('[role="dialog"]')).toBeNull()
 })
 
+it('opens the summary from the teams list without leaving the list', async () => {
+  await mount()
+  await click(tab(zh['tab.team']))
+  const card = document.querySelector<HTMLElement>('.dt-list .dt-summary-card')!
+  expect(card).not.toBeNull()
+  await click(card)
+  expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe(zh.teamSummary)
+  expect(document.querySelector('.dt-status-title')?.textContent).toContain(zh.teamTitle)
+  await click(find(zh.close))
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+})
+
 it('explains /team and the six roles when there are no teams', async () => {
   server.teams = { items: [], details: {} }
   await mount()
