@@ -13,7 +13,7 @@ import type { Team, TeamSummary } from './teams.ts'
 export const TICKET_FILTERS = ['open', 'person', 'working', 'idle', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
 /** Panel-side filters for the Team list; teams are filtered by state and outcome, not by a host query. */
-export const TEAM_FILTERS = ['done', 'verify', 'running', 'all'] as const
+export const TEAM_FILTERS = ['verify', 'running', 'done', 'all'] as const
 export type TicketFilter = typeof TICKET_FILTERS[number]
 export type ThreadFilter = typeof THREAD_FILTERS[number]
 export type TeamFilter = typeof TEAM_FILTERS[number]

@@ -71,7 +71,7 @@ The team output is evidence for a person, not an automatic merge: review the sum
 
 ## Team list filters
 
-The Team tab filters the list into **Done**, **To verify**, **Running** and **ALL**. *Done* means a finished team whose outcome is `achieved`; *To verify* collects terminal teams that are not achieved (including legacy records without an outcome, `unverified`, `not_achieved`, failed and stopped teams); *Running* is the live state; *ALL* shows every record. The selected filter is kept in the panel route.
+The Team tab filters the list into **To verify**, **Running**, **Close** and **ALL**. *Close* means a finished team whose outcome is `achieved`; *To verify* collects terminal teams that are not achieved (including legacy records without an outcome, `unverified`, `not_achieved`, failed and stopped teams); *Running* is the live state; *ALL* shows every record. The selected filter is kept in the panel route.
 
 ## Continuing a finished team
 

@@ -42,6 +42,8 @@ it('filters teams by done, to verify, running and all', async () => {
   server.teams.items[1]!.outcome = 'unverified'
   await mount()
   await click(tab(zh['tab.team']))
+  expect(all('.dt-filters button').map(button => button.textContent)).toEqual([zh['teamFilter.verify'],
+    zh['teamFilter.running'], zh['teamFilter.done'], zh['teamFilter.all']])
   expect(all('.dt-list .dt-row-title').map(title => title.textContent)).toEqual(['修复登录页回归', '发布检查'])
   await click(find(zh['teamFilter.running']))
   expect(all('.dt-list .dt-row-title').map(title => title.textContent)).toEqual(['修复登录页回归'])

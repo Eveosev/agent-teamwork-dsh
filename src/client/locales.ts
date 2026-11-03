@@ -434,7 +434,7 @@ const TEXT = {
   teamTokenOutput: ['输出', 'Output'],
   teamTokenCached: ['缓存', 'Cached'],
   teamRounds: ['轮次', 'Rounds'],
-  'teamFilter.done': ['已完成', 'Done'],
+  'teamFilter.done': ['已关闭', 'Close'],
   'teamFilter.verify': ['待验收', 'To verify'],
   'teamFilter.running': ['运行中', 'Running'],
   'teamFilter.all': ['全部', 'ALL'],
