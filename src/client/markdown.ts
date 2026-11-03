@@ -48,7 +48,7 @@ function tableCells(line: string): string[] {
 function tableAlign(line: string): Align[] | undefined {
   if (!line.includes('|')) return undefined
   const cells = tableCells(line)
-  if (!cells.length || cells.some(cell => !/^:?-{3,}:?$/.test(cell))) return undefined
+  if (!cells.length || cells.some(cell => !/^:?-{1,}:?$/.test(cell))) return undefined
   return cells.map(cell => cell.startsWith(':') && cell.endsWith(':') ? 'center' : cell.endsWith(':') ? 'right' : 'left')
 }
 export function markdownBlocks(text: string): Block[] {

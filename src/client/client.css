@@ -422,3 +422,12 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-team-attachment-add { min-width:76px; height:76px; padding:0 10px; border:1px dashed var(--dsw-alias-border); border-radius:8px; display:inline-flex; flex-direction:column; gap:3px; align-items:center; justify-content:center; color:var(--dsw-alias-text-secondary); background:none; font:inherit; font-size:12px; cursor:pointer; }
 .dt-team-attachment-add:hover:not(:disabled) { color:var(--dsw-alias-link); border-color:var(--dsw-alias-link); }
 .dt-team-attachment-add:disabled { opacity:.55; cursor:default; }
+.dt-run-history { margin-top: 8px; border-top: 1px solid var(--dsw-alias-border); padding-top: 6px; }
+.dt-run-history summary { cursor: pointer; color: var(--dsw-alias-text-secondary); font-size: 12px; }
+.dt-run-history .dt-hint { margin: 5px 0; }
+.dt-run-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.dt-run-row { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.dt-run-round { flex: none; color: var(--dsw-alias-text-secondary); }
+.dt-run-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-run-state { flex: none; color: var(--dsw-alias-text-secondary); }
+.dt-run-row .dt-btn { margin-left: auto; }

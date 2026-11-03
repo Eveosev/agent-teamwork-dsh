@@ -28,6 +28,7 @@ it('lists teams with their state, progress and member dots, and opens the six ro
   expect(text()).toContain('Tests failed: 1 failure')
   // Member output is rendered as a collapsed reading card with the same dialog as the summary.
   expect(all('.dt-card .dt-md-table th').map(cell => cell.textContent)).toEqual(['Step', 'State'])
+  expect(text()).toContain(zh.teamRunHistory)
   const output = document.querySelector<HTMLElement>('.dt-card .dt-reading-card[data-kind="output"]')!
   expect(output.textContent).toContain(zh.teamOutputRead)
   expect(output.querySelector('.dt-reading-preview')).not.toBeNull()

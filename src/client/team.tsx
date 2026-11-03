@@ -1,5 +1,5 @@
 /** Team list with a start form and team detail with the six role cards, member sessions, outputs and final summary. */
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { TEAM_FILTERS, type ApiResponse, type TeamFilter, type TeamImageUpload } from '../app/api.ts'
 import { ApiError, usePoll } from './api.ts'
 import { Button, Dot, Icon, InfoTip, Input, Modal, Pill, Tag, type DotState, type TagTone } from './controls.tsx'
@@ -15,6 +15,17 @@ type MemberState = TeamMember['state']
 type TeamRole = TeamMember['role']
 type TeamOutcome = NonNullable<Team['outcome']>
 type TeamUsage = NonNullable<Team['usage']>
+type TeamRun = NonNullable<TeamMember['runs']>[number]
+/** Re-render an elapsed duration every second while its owner is still running. */
+function useNow(active: boolean): number {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const timer = setInterval(() => setTick(value => value + 1), 1000)
+    return () => clearInterval(timer)
+  }, [active])
+  return Date.now()
+}
 type PendingImage = TeamImageUpload & { preview: string }
 const MAX_CONTINUATION_IMAGES = 4
 const MAX_CONTINUATION_IMAGE_BYTES = 8 * 1024 * 1024
@@ -29,6 +40,7 @@ const memberTone = (state: MemberState): TagTone => state === 'running' ? 'info'
 const teamTone = (state: TeamState): TagTone => state === 'running' ? 'info' : state === 'done' ? 'success'
   : state === 'failed' ? 'danger' : 'neutral'
 const roleLabel = (t: T, role: TeamRole): string => valueLabel(t, 'teamRole', role)
+const runSourceLabel = (t: T, source: TeamRun['source'] | undefined): string => valueLabel(t, 'teamRunSource', source)
 const memberLabel = (t: T, state: MemberState): string => valueLabel(t, 'teamMemberState', state)
 const teamStateLabel = (t: T, state: TeamState): string => valueLabel(t, 'teamState', state)
 const outcomeLabel = (t: T, outcome: TeamOutcome): string => outcome === 'achieved' ? t('teamOutcome.achieved')
@@ -119,8 +131,11 @@ function MemberCard({ team, role }: { team: Team; role: TeamRole }) {
   const member = team.members.find(item => item.role === role)
   const state = member?.state ?? 'idle'
   const label = memberLabel(t, state)
-  const end = member?.ended_at ?? (state === 'running' ? undefined : team.updated_at)
+  const now = useNow(state === 'running')
+  const end = member?.ended_at ?? (state === 'running' ? new Date(now).toISOString() : team.updated_at)
   const elapsed = member?.started_at ? durationText(t, member.started_at, end) : t('empty')
+  const runs = member?.runs ?? []
+  const latest = runs.at(-1)
   return <div className="dt-card" data-state={state}>
     <div className="dt-card-head">
       <Dot state={stateDot(state)} label={label} />
@@ -136,13 +151,27 @@ function MemberCard({ team, role }: { team: Team; role: TeamRole }) {
       </span>
     </div>
     <div className="dt-row-meta"><LabelValue label={t('teamElapsed')} value={elapsed} />
-      {member?.round && member.round > 1 && <LabelValue label={t('teamRounds')} value={member.round} />}
+      {member?.round && <LabelValue label={t('teamRoundLabel')} value={member.round} />}
+      {latest ? <LabelValue label={t('teamRunSource')} value={runSourceLabel(t, latest.source)} />
+        : member?.session_id ? <LabelValue label={t('teamRunSource')} value={t('teamRunSourceUnknown')} /> : null}
       {member?.usage && <TokenUsageLine usage={member.usage} />}
     </div>
     {member?.session_id && <div className="dt-actions">
       <span className="dt-mono">{member.session_id}</span>
       <SessionButton variant="outline" sessionId={member.session_id} />
     </div>}
+    {runs.length > 0 ? <details className="dt-run-history">
+      <summary>{t('teamRunHistory')} ({runs.length})</summary>
+      <div className="dt-hint">{t('teamRunHistoryHint')}</div>
+      <ul className="dt-run-list">
+        {runs.map((run, index) => <li className="dt-run-row" key={`${run.round}-${run.source}-${index}`}>
+          <span className="dt-run-round">{t('teamRound', { count: run.round })}</span>
+          <span className="dt-run-source">{runSourceLabel(t, run.source)}</span>
+          <span className="dt-run-state">{memberLabel(t, run.state)}</span>
+          {run.session_id && <SessionButton variant="ghost" sessionId={run.session_id} />}
+        </li>)}
+      </ul>
+    </details> : member?.session_id ? <div className="dt-hint">{t('teamRunHistoryLegacy')}</div> : null}
     {member?.error && <p className="dt-banner dt-danger dt-mono">
       <span className="dt-banner-label">{t('teamError')}{t('labelSeparator')}</span>{member.error}
     </p>}
@@ -358,12 +387,13 @@ function TeamSummaryCard({ text, teamId }: { text: string; teamId: string }) {
 export function TeamPage({ id }: { id: string }) {
   const { t, call, navigate } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET teams/:id', { id }), [id])
+  const running = data?.state === 'running'
+  const now = useNow(running)
   if (!data) return <>
     <PageHead title={t('tab.team')} />
     {error instanceof ApiError && error.missing ? <Hint>{t('teamNotFound')}</Hint> : <LoadState error={error} loading />}
   </>
-  const running = data.state === 'running'
-  const end = running ? undefined : data.updated_at
+  const end = running ? new Date(now).toISOString() : data.updated_at
   return <>
     <PageHead title={data.title} />
     {error && <LoadState error={error} loading={false} />}
@@ -374,7 +404,7 @@ export function TeamPage({ id }: { id: string }) {
       <LabelValue label={t('teamCreated')} value={<When at={data.created_at} />} />
       <LabelValue label={running ? t('teamRunningFor') : t('teamDuration')}
         value={durationText(t, data.run_started_at ?? data.created_at, end)} />
-      {data.rounds && <LabelValue label={t('teamRounds')} value={data.rounds} />}
+      {data.rounds && <LabelValue label={t('teamRounds')} value={<>{data.rounds}<InfoTip text={t('teamRoundsHint')} /></>} />}
       {data.continuations && <LabelValue label={t('teamContinued')} value={data.continuations} />}
       {data.usage && <TokenUsageLine usage={data.usage} />}
       {data.continued_from && <LabelValue label={t('teamContinuedFrom')} value={

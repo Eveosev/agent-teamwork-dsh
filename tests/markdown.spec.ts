@@ -24,6 +24,11 @@ it('reads a pipe table with alignment, a fenced code block and a horizontal rule
     { kind: 'code', language: 'ts', text: 'const x = 1' }, { kind: 'rule' }])
 })
 
+it('reads a table separator with one dash per column', () => {
+  expect(markdownBlocks('| 流 | 状态 |\n|-|-|\n| W0 | ✅ |\n')).toEqual([{ kind: 'table', headers: ['流', '状态'],
+    align: ['left', 'left'], rows: [['W0', '✅']] }])
+})
+
 it('reads a Markdown image as an image, both as a block and inline in text', () => {
   expect(markdownBlocks('![side panel](review-shot.png)\n')).toEqual([{ kind: 'image', alt: 'side panel', src: 'review-shot.png' }])
   expect(inlines('See ![side panel](review-shot.png).')).toEqual([{ kind: 'text', text: 'See ' },

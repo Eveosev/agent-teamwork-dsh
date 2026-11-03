@@ -74,6 +74,10 @@ describe('Teams', () => {
     expect(stored.rounds).toBe(1)
     expect(stored.members.find(member => member.role === 'tester')?.verdict).toBe('pass')
     expect(stored.members.find(member => member.role === 'reviewer')?.verdict).toBe('pass')
+    const leadRuns = stored.members.find(member => member.role === 'lead')?.runs ?? []
+    expect(leadRuns.map(run => [run.round, run.source])).toEqual([[1, 'task'], [1, 'all-roles']])
+    expect(leadRuns.every(run => run.state === 'done' && run.session_id)).toBe(true)
+    expect(stored.members.find(member => member.role === 'tester')?.runs?.map(run => run.source)).toEqual(['implementation'])
     expect(teams.list()[0]).toMatchObject({ id: team.id, state: 'done' })
     expect(teams.activeCount).toBe(0)
   })

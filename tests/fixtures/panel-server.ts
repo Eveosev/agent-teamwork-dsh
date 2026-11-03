@@ -247,11 +247,12 @@ const teamMember = (role: TeamMember['role'], state: TeamMember['state'], extra:
 function teamFixtures(): PanelServer['teams'] {
   const now = Date.now()
   const at = (ago: number) => new Date(now - ago).toISOString()
-  const lead = `**Lead plan**\n\n| Step | State |\n|---|---|\n| inspect | done |\n\n${'Lead plan: inspect the login redirect, fix it, then verify the tests.\n'.repeat(30)}END-OF-LEAD-OUTPUT`
+  const lead = `**Lead plan**\n\n| Step | State |\n|-|-|\n| inspect | done |\n\n${'Lead plan: inspect the login redirect, fix it, then verify the tests.\n'.repeat(30)}END-OF-LEAD-OUTPUT`
   const running: Team = {
     id: 'team-1', title: '修复登录页回归', task: '修复登录页回归，并补充测试。', state: 'running', created_at: at(600_000),
     updated_at: at(30_000), parent_session_id: 'master', directory: '/tmp/team', members: [
-      teamMember('lead', 'done', { session_id: 'team-lead', output: lead, started_at: at(600_000), ended_at: at(480_000) }),
+      teamMember('lead', 'done', { session_id: 'team-lead', output: lead, started_at: at(600_000), ended_at: at(480_000),
+        runs: [{ round: 1, source: 'task', state: 'done', session_id: 'team-lead', started_at: at(600_000), ended_at: at(480_000) }] }),
       teamMember('researcher', 'running', { profile: 'researcher', session_id: 'team-researcher', started_at: at(240_000) }),
       teamMember('developer', 'done', { profile: 'developer', session_id: 'team-developer', output: 'Changed src/login.tsx',
         started_at: at(240_000), ended_at: at(60_000) }),

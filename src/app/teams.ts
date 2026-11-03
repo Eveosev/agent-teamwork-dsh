@@ -16,6 +16,11 @@ export type MemberState = 'idle' | 'running' | 'done' | 'failed' | 'stopped'
 /** Whether the team's acceptance criteria were met, independently of whether execution finished. */
 export type TeamOutcome = 'achieved' | 'not_achieved' | 'unverified'
 export type MemberVerdict = 'pass' | 'fail'
+/** The context a role activation was built from, shown in the run history so a person can tell who supplied the prompt. */
+export type TeamRunSource = 'task' | 'continuation' | 'lead-plan' | 'implementation' | 'verification' | 'lead-repair' | 'all-roles'
+/** One role activation; every round starts a new child Session, so this is the per-round history behind `session_id`. */
+export interface TeamRun { round: number; source: TeamRunSource; state: MemberState; session_id?: string; started_at?: string; ended_at?: string
+  error?: string }
 /** Token counts summed over every model call a role made; cache reads are disjoint from uncached input. */
 export interface TeamUsage { input: number; output: number; cached: number }
 export const TEAM_ROLE_LABELS: Record<TeamRole, string> = { lead: 'Team lead', researcher: 'Researcher', developer: 'Developer',
@@ -32,7 +37,7 @@ const ROLE_INSTRUCTIONS: Record<TeamRole, string> = {
 
 /** One role's latest run in a team. */
 export interface TeamMember { role: TeamRole; profile: string | null; state: MemberState; session_id?: string; output?: string; error?: string
-  started_at?: string; ended_at?: string; round?: number; verdict?: MemberVerdict; usage?: TeamUsage }
+  started_at?: string; ended_at?: string; round?: number; verdict?: MemberVerdict; usage?: TeamUsage; runs?: TeamRun[] }
 /** A durable team record, listed and inspected by the panel. */
 export interface Team { id: string; title: string; task: string; state: TeamState; created_at: string; updated_at: string
   run_started_at?: string; parent_session_id: string; directory: string; members: TeamMember[]; summary?: string; error?: string
@@ -360,7 +365,11 @@ export class Teams {
   private finish(team: Team, state: TeamState, error?: string): void {
     team.state = state
     if (error) team.error = error
-    for (const member of team.members) if (member.state === 'running') { member.state = state === 'done' ? 'done' : 'failed'; member.ended_at = new Date().toISOString() }
+    const at = new Date().toISOString()
+    for (const member of team.members) {
+      if (member.state === 'running') { member.state = state === 'done' ? 'done' : 'failed'; member.ended_at = at }
+      for (const run of member.runs ?? []) if (run.state === 'running') { run.state = member.state; run.ended_at ??= at }
+    }
     this.save(team)
   }
   private member(team: Team, role: TeamRole): TeamMember {
@@ -401,7 +410,8 @@ export class Teams {
   }
 
   /** Runs one role to completion and returns its text. Attached images follow the text when the role's model accepts them. */
-  private async run(team: Team, role: TeamRole, prompt: string, parent: Agent, signal: AbortSignal, images: readonly ImageBlock[] = [], round = 1): Promise<string> {
+  private async run(team: Team, role: TeamRole, prompt: string, parent: Agent, signal: AbortSignal, images: readonly ImageBlock[] = [],
+    round = 1, source: TeamRunSource = 'task'): Promise<string> {
     const member = this.member(team, role)
     const settings = this.host.settings()
     const profileId = member.profile
@@ -409,7 +419,10 @@ export class Teams {
     const model = profile?.model ?? settings.executor.model
     const subagents = (this.host.context as unknown as { subagents?: Subagents }).subagents
     if (!subagents) throw new Error('The subagent service is not available in this DSH profile')
-    member.state = 'running'; member.started_at = new Date().toISOString(); member.round = round; delete member.error
+    const startedAt = new Date().toISOString()
+    member.state = 'running'; member.started_at = startedAt; member.round = round; delete member.error
+    const run: TeamRun = { round, source, state: 'running', started_at: startedAt }
+    member.runs = [...(member.runs ?? []), run]
     delete member.verdict; this.save(team)
     const agentOptions = model ? { provider: model.provider, model: model.model, ...model.reasoningEffort ? { reasoningEffort: model.reasoningEffort } : {} } : undefined
     const rolePrompt = profile?.instructions ? `${ROLE_INSTRUCTIONS[role]}\n\n${profile.instructions}` : ROLE_INSTRUCTIONS[role]
@@ -421,11 +434,13 @@ export class Teams {
         request: { prompt: content, parent, cwd: team.directory, ...(profile?.preset ? { agentPreset: profile.preset } : { agentPreset: 'dsh-superagent-worker' }),
           ...agentOptions ? { agentOptions } : {} }, signal, delivery: 'caller' })
     } catch (error) {
-      member.state = 'failed'; member.error = String(error).slice(0, 1000); member.ended_at = new Date().toISOString(); this.save(team)
+      run.state = 'failed'; run.error = String(error).slice(0, 1000); run.ended_at = new Date().toISOString()
+      member.state = 'failed'; member.error = String(error).slice(0, 1000); member.ended_at = run.ended_at; this.save(team)
       throw error
     }
     const childId = activation.childId
     member.session_id = childId
+    run.session_id = childId
     this.usageTargets.set(childId, { team: team.id, role })
     this.save(team)
     try {
@@ -445,10 +460,12 @@ export class Teams {
           if (usage) this.recordUsage(team.id, role, { inputTokens: usage.input, outputTokens: usage.output, cacheReadTokens: usage.cached })
         } catch (error) { this.host.logger.warn(`team ${team.id}: usage snapshot failed: ${String(error)}`) }
       }
-      member.ended_at = new Date().toISOString(); this.save(team)
+      member.ended_at = new Date().toISOString()
+      run.state = member.state; run.ended_at = member.ended_at; this.save(team)
       return member.output
     } catch (error) {
-      member.state = signal.aborted ? 'stopped' : 'failed'; member.error = String(error).slice(0, 1000); member.ended_at = new Date().toISOString(); this.save(team)
+      member.state = signal.aborted ? 'stopped' : 'failed'; member.error = String(error).slice(0, 1000); member.ended_at = new Date().toISOString()
+      run.state = member.state; run.ended_at = member.ended_at; run.error = member.error; this.save(team)
       return ''
     } finally {
       try {
@@ -488,7 +505,7 @@ export class Teams {
     const background = continuation ? this.continuationContext(continuation) : ''
     const notice = continuation ? this.continuationNote(continuation) : ''
     const plan = await this.run(team, 'lead', `${task}\n\n${background ? `${background}\n\n` : ''}First produce the plan only; the team implements after it.`,
-      parent, signal, images)
+      parent, signal, images, 1, continuation ? 'continuation' : 'task')
     if (signal.aborted) return
     let round = 1
     let history = ''
@@ -499,28 +516,28 @@ export class Teams {
       if (round === 1) {
         await Promise.all([
           this.run(team, 'researcher', `${task}\n\nPlan:\n${plan}\n\n${notice ? `${notice}\n\n` : ''}Gather the repository and external context the implementer needs.`,
-            parent, signal, images, round),
+            parent, signal, images, round, 'lead-plan'),
           this.run(team, 'developer', `${task}\n\nPlan:\n${plan}\n\n${background ? `${background}\n\n` : ''}Implement the task now.`,
-            parent, signal, images, round),
+            parent, signal, images, round, 'lead-plan'),
         ])
       } else {
         const previous = this.contextOf(team, ['researcher', 'developer'])
         const repair = await this.run(team, 'lead', `${task}\n\nPlan:\n${plan}\n\nRound ${round - 1} did not pass verification:\n${verification}\n\n` +
           `${notice ? `${notice}\n\n` : ''}Write concise repair instructions for the developer: the concrete changes, acceptance criteria and checks to rerun. Do not edit files.`,
-        parent, signal, images, round)
+        parent, signal, images, round, 'verification')
         if (signal.aborted) return
         await this.run(team, 'developer', `${task}\n\nPlan:\n${plan}\n\nCurrent implementation evidence:\n${previous}\n\n` +
           `Verification failure:\n${verification}\n\nLead repair instructions:\n${repair}\n\n${notice ? `${notice}\n\n` : ''}Apply the repair now.`,
-        parent, signal, images, round)
+        parent, signal, images, round, 'lead-repair')
       }
       if (signal.aborted) return
       const work = this.contextOf(team, ['researcher', 'developer'])
       const prior = history ? `\n\nEarlier verification:\n${history}` : ''
       await Promise.all([
         this.run(team, 'tester', `${task}\n\nPlan:\n${plan}\n\n${work}${prior}${notice ? `\n\n${notice}` : ''}\n\nTest the implementation and report the commands and results.`,
-          parent, signal, images, round),
+          parent, signal, images, round, 'implementation'),
         this.run(team, 'reviewer', `${task}\n\nPlan:\n${plan}\n\n${work}${prior}${notice ? `\n\n${notice}` : ''}\n\nReview the implementation and report findings; do not edit. ` +
-          'If the task is a product or feature design that can be verified visually, include a real screenshot and its path as evidence.', parent, signal, images, round),
+          'If the task is a product or feature design that can be verified visually, include a real screenshot and its path as evidence.', parent, signal, images, round, 'implementation'),
       ])
       if (signal.aborted) return
       verification = this.contextOf(team, ['tester', 'reviewer'])
@@ -538,13 +555,13 @@ export class Teams {
     team.rounds = round; this.save(team)
     const finalWork = this.contextOf(team, ['researcher', 'developer'])
     await this.run(team, 'ops', `${task}\n\n${finalWork}\n\nVerification:\n${verification}\n\n${notice ? `${notice}\n\n` : ''}Inspect CI and repository status; do not edit.`,
-      parent, signal, images, round)
+      parent, signal, images, round, 'verification')
     if (signal.aborted) return
     const evidence = this.contextOf(team, TEAM_ROLES)
     const synthesis = await this.run(team, 'lead', `${task}\n\nPlan:\n${plan}\n\nAll team evidence:\n${evidence}\n\n` +
       `${notice ? `${notice}\n\n` : ''}Final verification outcome: ${outcomeText(outcome)} after round ${round}. Synthesize the final result: what changed, ` +
       'what was verified, what failed, and what a human should do next. Do not claim success when the outcome is NOT ACHIEVED or UNVERIFIED. ' +
-      'This is the team summary.', parent, signal, images, round)
+      'This is the team summary.', parent, signal, images, round, 'all-roles')
     team.summary = clip(synthesis)
     team.outcome = outcome
     team.state = 'done'
