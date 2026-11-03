@@ -77,7 +77,7 @@ export function ExecutionSettings() {
   const { blocks, environment, sources } = useSettings().settings
   // Keep raw user text (such as separators between blocked commands) in the draft and parse only on save.
   const executor = blocks.executor.value
-  const saved = { ...executor, maxWorkers: String(executor.maxWorkers), maxRounds: String(executor.maxRounds),
+  const saved = { ...executor, maxWorkers: String(executor.maxWorkers), maxRounds: String(executor.maxRounds ?? 3),
     blockedCommands: executor.blockedCommands.join(' '), defaultProfile: executor.defaultProfile ?? '' }
   const draft = useBlockDraft('executor', saved, blocks.executor.revision,
     value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), maxRounds: numberOf(value.maxRounds),

@@ -156,7 +156,7 @@ export function useDraft<V, M = undefined>({ key, saved, revision, save, reload 
     try {
       result = await save(draft.value, draft.revision, draft.base)
     } catch (failure) {
-      const fields = failure instanceof ApiError ? failure.issues.map(issue => issue.path) : []
+      const fields = failure instanceof ApiError ? failure.issues.map(issue => issue.path).filter(Boolean) : []
       if (failure instanceof ApiError && failure.status === 409) {
         await reload().then(() => dispatch({ type: 'refused', notice: { kind: 'rebasing' } }), failed)
       } else dispatch({ type: 'refused', notice: fields.length ? { kind: 'invalid', fields } : { kind: 'failed',
