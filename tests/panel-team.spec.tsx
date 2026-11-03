@@ -22,6 +22,8 @@ it('lists teams with their state, progress and member dots, and opens the six ro
   expect(text()).toContain('配置：researcher')
   expect(text()).toContain('配置：默认')
   expect(text()).toContain('Tests failed: 1 failure')
+  // Member output is rendered as Markdown, not a raw transcript.
+  expect(all('.dt-card .dt-md-table th').map(cell => cell.textContent)).toEqual(['Step', 'State'])
   // A long lead output is truncated behind Show all, and the session opens in the host panel.
   expect(text()).not.toContain('END-OF-LEAD-OUTPUT')
   await click(find(zh.openSession))

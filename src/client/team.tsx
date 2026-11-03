@@ -45,12 +45,21 @@ function durationText(t: T, from: string, to: string | undefined): string {
   return t('teamSeconds', { count: total })
 }
 
+/** Cut a long member output at a line boundary and close an open fence, so a preview does not end mid-code-block. */
+function previewText(text: string): string {
+  const slice = text.slice(0, OUTPUT_PREVIEW)
+  const cut = slice.lastIndexOf('\n')
+  const body = cut > OUTPUT_PREVIEW * 0.6 ? slice.slice(0, cut) : slice
+  const fences = body.match(/^\s*```/gm)?.length ?? 0
+  return `${body}${fences % 2 ? '\n```' : ''}…`
+}
+
 function MemberOutput({ text }: { text: string }) {
   const { t } = usePanel()
   const [open, setOpen] = useState(false)
   const long = text.length > OUTPUT_PREVIEW
   return <>
-    <pre className="dt-pre">{long && !open ? `${text.slice(0, OUTPUT_PREVIEW)}…` : text}</pre>
+    <div className="dt-md-output"><MarkdownLite text={long && !open ? previewText(text) : text} /></div>
     {long && <button type="button" className="dt-textlink dt-more" aria-expanded={open}
       onClick={() => setOpen(!open)}>{open ? t('collapse') : t('expand')}</button>}
   </>

@@ -241,7 +241,7 @@ const teamMember = (role: TeamMember['role'], state: TeamMember['state'], extra:
 function teamFixtures(): PanelServer['teams'] {
   const now = Date.now()
   const at = (ago: number) => new Date(now - ago).toISOString()
-  const lead = `${'Lead plan: inspect the login redirect, fix it, then verify the tests.\n'.repeat(30)}END-OF-LEAD-OUTPUT`
+  const lead = `**Lead plan**\n\n| Step | State |\n|---|---|\n| inspect | done |\n\n${'Lead plan: inspect the login redirect, fix it, then verify the tests.\n'.repeat(30)}END-OF-LEAD-OUTPUT`
   const running: Team = {
     id: 'team-1', title: '修复登录页回归', task: '修复登录页回归，并补充测试。', state: 'running', created_at: at(600_000),
     updated_at: at(30_000), parent_session_id: 'master', directory: '/tmp/team', members: [

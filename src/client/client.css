@@ -171,6 +171,7 @@ div.dt-preview-head { color: var(--dsw-alias-label-secondary); }
 .dt-pre { margin: 0; padding: 12px; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; }
 .dt-pre ins { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, green) 18%, transparent); text-decoration: none; }
 .dt-pre del { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent); text-decoration: none; }
+.dt-md-output { max-height: 480px; overflow: auto; padding-right: 2px; }
 .dt-prompt { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }
 .dt-prompt-nav { display: flex; flex-direction: column; gap: 2px; }
 .dt-prompt-nav button { justify-content: flex-start; }
