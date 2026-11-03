@@ -193,6 +193,9 @@ export class Teams {
         if (!lineage.has(item) && record.continued_from && lineage.has(record.continued_from)) { lineage.add(item); changed = true }
       }
     }
+    if ([...lineage].some(item => this.active.has(item) || records.get(item)?.state === 'running')) {
+      throw new Error('Stop the running continuation before deleting the lineage')
+    }
     this.host.store.atomic(() => {
       this.host.store.set(KV.teams.index, ids.filter(item => !lineage.has(item)))
       for (const item of lineage) this.host.store.delete(KV.teams.record(item))
