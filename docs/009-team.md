@@ -69,6 +69,8 @@ A Team record holds the task, title, timestamps, parent Session, each member's p
 
 The team output is evidence for a person, not an automatic merge: review the summary, the child Sessions and the diff before shipping.
 
+Team outputs keep Markdown image syntax. The panel renders images inline and turns relative or absolute local file links into a file dialog. `GET teams/:id/file?path=...` serves supported images and text only from the team's working directory; paths resolved outside it (including through symlinks) are refused. Images are capped at 8 MB.
+
 ## Team list filters
 
 The Team tab filters the list into **To verify**, **Running**, **Close** and **ALL**. *Close* means a finished team whose outcome is `achieved`; *To verify* collects terminal teams that are not achieved (including legacy records without an outcome, `unverified`, `not_achieved`, failed and stopped teams); *Running* is the live state; *ALL* shows every record. The selected filter is kept in the panel route.
@@ -90,6 +92,7 @@ The panel uses the same routes:
 ```text
 GET  /orchestrator/api/teams                 -> { items: TeamSummary[], active: number }
 GET  /orchestrator/api/teams/:id             -> Team
+GET  /orchestrator/api/teams/:id/file?path=  -> { name, mime, data } (base64; only inside the Team directory)
 POST /orchestrator/api/teams                 { task, title?, directory? } -> { team }
 POST /orchestrator/api/teams/:id/continue    { instruction? } -> { team }
 POST /orchestrator/api/teams/:id/stop        -> { stopped: boolean }

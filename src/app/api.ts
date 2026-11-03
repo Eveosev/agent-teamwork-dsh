@@ -8,7 +8,7 @@ import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketListView } from './views/tickets.ts'
-import type { Team, TeamSummary } from './teams.ts'
+import type { Team, TeamFile, TeamSummary } from './teams.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'working', 'idle', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
@@ -36,6 +36,7 @@ export interface Api {
   'POST decisions/:id/dismiss': { response: { dismissed: true } }
   'GET teams': { response: { items: TeamSummary[]; active: number } }
   'GET teams/:id': { response: Team }
+  'GET teams/:id/file': { query: { path: string }; response: TeamFile }
   'POST teams': { body: { task: string; title?: string; directory?: string }; response: { team: Team } }
   'POST teams/:id/continue': { body: { instruction?: string }; response: { team: Team } }
   'POST teams/:id/stop': { response: { stopped: boolean } }

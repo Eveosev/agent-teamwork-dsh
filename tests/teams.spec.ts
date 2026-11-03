@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { SettingsSchema, type Settings } from '../src/policy.ts'
 import { Teams, TEAM_ROLES, type TeamsHost } from '../src/app/teams.ts'
@@ -239,6 +241,21 @@ describe('Teams', () => {
       expect(run.blocks).toHaveLength(1)
       expect(run.prompt).toContain('omitted: this role\'s model does not accept image input')
     }
+  })
+
+  it('reads only image or text files inside the team directory', async () => {
+    const { teams } = bench()
+    const team = teams.create('Collect evidence', parent)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    writeFileSync(join(team.directory, 'shot.png'), Buffer.from('png'))
+    writeFileSync(join(team.directory, 'notes.md'), 'hello')
+    writeFileSync('/tmp/team-state/secret.txt', 'outside')
+    const image = teams.readFile(team.id, 'shot.png')
+    expect(image).toMatchObject({ name: 'shot.png', mime: 'image/png' })
+    expect(Buffer.from(image!.data, 'base64').toString()).toBe('png')
+    expect(teams.readFile(team.id, 'notes.md')).toMatchObject({ name: 'notes.md', mime: 'text/markdown; charset=utf-8' })
+    expect(teams.readFile(team.id, '../secret.txt')).toBeUndefined()
+    expect(teams.readFile(team.id, '/tmp/team-state/secret.txt')).toBeUndefined()
   })
 
   it('stops a running team, aborting its signal and recording stopped members', async () => {

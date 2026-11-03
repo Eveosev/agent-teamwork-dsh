@@ -269,6 +269,7 @@ function teamFixtures(): PanelServer['teams'] {
     members: TEAM_ROLE_NAMES.map(role =>
       teamMember(role, 'done', { started_at: at(1_800_000), ended_at: at(1_200_000), round: 2,
         ...role === 'tester' || role === 'reviewer' ? { verdict: 'pass' as const } : {},
+        ...role === 'reviewer' ? { output: '## Evidence\n\n![Tab Tree side panel](review-shot.png)\n\nSee [the research note](docs/research.md#L74).' } : {},
         usage: { input: 1200, output: 300, cached: 850 } })),
   }
   return { items: [teamSummary(running), teamSummary(done)], details: { [running.id]: running, [done.id]: done } }
@@ -369,6 +370,9 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET teams': { answer: () => ({ items: server.teams.items,
     active: server.teams.items.filter(team => team.state === 'running').length }) },
   'GET teams/:id': { answer: ({ params }) => server.teams.details[params.id] ?? refuse(404, `No team ${params.id}`) },
+  'GET teams/:id/file': { query: ['path'], answer: ({ params, query }) => server.teams.details[params.id]
+    ? { name: 'screenshot.png', mime: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lYz3WQAAAABJRU5ErkJggg==', path: query.path }
+    : refuse(404, `No team ${params.id}`) },
   'POST teams': { body: true, answer: ({ body }) => {
     const at = new Date().toISOString()
     const team: Team = { id: `team-${server.teams.items.length + 1}`,

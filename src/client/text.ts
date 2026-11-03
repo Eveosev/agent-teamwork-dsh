@@ -35,8 +35,9 @@ export const setupText = (t: T, problem: Pick<SetupProblem, 'code' | 'values'>):
 export const healthText = (t: T, health: Pick<Health, 'detail' | 'code' | 'values'>): string =>
   health.code ? t(`healthCode.${health.code}` as const, health.values) : health.detail
 /** Replaces Feishu and GitHub content placeholders (images, cards, media, forwards, unresolved mentions) with localized labels. */
-export function readableMarkers(t: T, text: string): string {
-  return text.replace(/!\[[^\]]*\]\([^)]*\)|\[Image: [^\]]*\]|\[image\]/g, t('imageMarker'))
+export function readableMarkers(t: T, text: string, keepImages = false): string {
+  const source = keepImages ? text : text.replace(/!\[[^\]]*\]\([^)]*\)/g, t('imageMarker'))
+  return source.replace(/\[Image: [^\]]*\]|\[image\]/g, t('imageMarker'))
     .replace(/\[Chat card: [^\]]*\]/g, t('cardMarker'))
     .replace(/\[Media: [^\]]*\]/g, t('mediaMarker')).replace(/\[Merged forward\]/g, t('forwardMarker'))
     .replace(/@_user_\d+/g, t('unknownMention'))

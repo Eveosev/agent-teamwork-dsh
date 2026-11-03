@@ -451,6 +451,7 @@ const TEXT = {
   teamContinueHint: ['在当前 Team 记录上继续执行，不会新建卡片；会重新运行全部 6 个角色，可以在这里说明这次要继续完成的内容。',
     'Continue in this Team record without creating another card; all six roles run again. Optionally add what this run should finish.'],
   teamContinuedTimes: ['续跑 ×{count}', 'Continued ×{count}'],
+  fileUnavailable: ['文件无法读取，或不在 Team 工作目录中。', 'The file cannot be read or is outside the Team working directory.'],
   teamPreviousAttempt: ['上次尝试', 'Previous attempt'],
   teamContinuePlaceholder: ['例如：按未解决项继续修复，并重新验收…', 'For example: fix the remaining issues and verify again…'],
   teamContinueStart: ['启动继续执行', 'Start continuation'],

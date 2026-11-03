@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // The Team tab: the team list, the start form, a team detail, and stopping a running team.
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
 import { usePanel, mount, all, find, tab, click, type, text, field, at } from './fixtures/panel.tsx'
 import { server } from './fixtures/panel-server.ts'
@@ -67,6 +67,19 @@ it('starts a team from the form and opens the new team', async () => {
     .toMatchObject({ body: { task: 'Ship the release', title: '发布修复', directory: '/tmp/repo' } })
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('发布修复')
   expect(all('.dt-grid3 .dt-card').length).toBe(6)
+})
+
+it('renders screenshots and opens local file links inside a team output', async () => {
+  at({ page: 'team', id: 'team-2' })
+  await mount()
+  const card = all('.dt-reading-card[data-kind="output"]')[0]!
+  await click(card)
+  const dialog = document.querySelector('[role="dialog"]')!
+  await vi.waitFor(() => expect(dialog.querySelector('img[src^="data:image/png"]')).not.toBeNull())
+  const link = dialog.querySelector<HTMLButtonElement>('.dt-md-local-button')!
+  expect(link.textContent).toBe('the research note')
+  await click(link)
+  await vi.waitFor(() => expect(document.querySelector('.dt-file-image')).not.toBeNull())
 })
 
 it('continues a finished team from its page with an optional instruction', async () => {

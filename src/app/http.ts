@@ -36,7 +36,7 @@ export interface HttpHost {
   readonly sources: SourceRegistry
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'ensure'>
-  readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'continueTeam' | 'stop' | 'activeCount'>
+  readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'continueTeam' | 'stop' | 'activeCount' | 'readFile'>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount'>
@@ -152,6 +152,7 @@ const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().no
 const TeamCreateRequest = z.object({ task: z.string().trim().min(1).max(8000), title: z.string().trim().max(120).optional(),
   directory: z.string().trim().min(1).optional() }).strict()
 const TeamContinueRequest = z.object({ instruction: z.string().trim().max(8000).optional() }).strict()
+const TeamFileQuery = z.object({ path: z.string().trim().min(1).max(4096) }).strict()
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
@@ -193,6 +194,12 @@ function routes(runtime: HttpHost): Routes {
     'POST decisions/:id/dismiss': ({ params }) => { runtime.engine.dismiss(params.id); return { dismissed: true } },
     'GET teams': () => ({ items: runtime.teams.list(), active: runtime.teams.activeCount }),
     'GET teams/:id': ({ params }) => team(params.id),
+    'GET teams/:id/file': ({ params, query }) => {
+      const { path } = TeamFileQuery.parse(query)
+      const file = runtime.teams.readFile(params.id, path)
+      if (!file) throw new RouteError(404, 'Team file not found')
+      return file
+    },
     'POST teams': async ({ body }) => {
       const request = TeamCreateRequest.parse(await body())
       const settings = store.settings()

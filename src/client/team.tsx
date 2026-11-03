@@ -84,8 +84,8 @@ function durationText(t: T, from: string, to: string | undefined): string {
 }
 
 /** A collapsed reading card for long Markdown; the full text opens in a dialog. */
-function ReadingCard({ text, title, action, kind }: {
-  text: string; title: string; action: string; kind: 'summary' | 'output'
+function ReadingCard({ text, title, action, kind, teamId }: {
+  text: string; title: string; action: string; kind: 'summary' | 'output'; teamId?: string
 }) {
   const { t } = usePanel()
   const [open, setOpen] = useState(false)
@@ -99,13 +99,13 @@ function ReadingCard({ text, title, action, kind }: {
         setOpen(true)
       }}>
       <div className={long ? 'dt-reading-preview dt-reading-preview-fade' : 'dt-reading-preview'}>
-        <MarkdownLite text={text} links={false} />
+        <MarkdownLite text={text} links={false} teamId={teamId} />
       </div>
       <span className="dt-reading-more">{action}<Icon name="chevron-right" size={12} /></span>
     </div>
     <Modal open={open} onClose={() => setOpen(false)} title={title} closeLabel={t('close')}
       className="dt-reading-modal">
-      <div className="dt-reading-body"><MarkdownLite text={text} /></div>
+      <div className="dt-reading-body"><MarkdownLite text={text} teamId={teamId} /></div>
     </Modal>
   </>
 }
@@ -144,8 +144,8 @@ function MemberCard({ team, role }: { team: Team; role: TeamRole }) {
     </p>}
     {member?.output && <div className="dt-part">
       <div className="dt-field-head">{t('teamOutput')}</div>
-      <ReadingCard kind="output" text={member.output} title={`${roleLabel(t, role)}${t('labelSeparator')}${t('teamOutput')}`}
-        action={t('teamOutputRead')} />
+      <ReadingCard kind="output" text={member.output} teamId={team.id}
+        title={`${roleLabel(t, role)}${t('labelSeparator')}${t('teamOutput')}`} action={t('teamOutputRead')} />
     </div>}
   </div>
 }
@@ -172,7 +172,7 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
           return <Dot key={role} state={stateDot(state)} label={`${roleLabel(t, role)} · ${memberLabel(t, state)}`} />
         })}</span>
       </div>
-      {team.summary && <TeamSummaryCard text={team.summary} />}
+      {team.summary && <TeamSummaryCard text={team.summary} teamId={team.id} />}
     </div>
     <div className="dt-row-actions">
       {running ? <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
@@ -289,9 +289,9 @@ export function TeamStatus({ filter }: { filter: TeamFilter }) {
 }
 
 /** A collapsed, clickable reading card for the final summary; the full Markdown opens in a dialog. */
-function TeamSummaryCard({ text }: { text: string }) {
+function TeamSummaryCard({ text, teamId }: { text: string; teamId: string }) {
   const { t } = usePanel()
-  return <ReadingCard kind="summary" text={text} title={t('teamSummary')} action={t('teamSummaryRead')} />
+  return <ReadingCard kind="summary" text={text} title={t('teamSummary')} action={t('teamSummaryRead')} teamId={teamId} />
 }
 
 /** Team detail: state and duration, the task, six role cards, and the lead's final summary. */
@@ -339,14 +339,14 @@ export function TeamPage({ id }: { id: string }) {
     </Section>}
     {data.previous_summary && <Section title={t('teamPreviousAttempt')}>
       {data.previous_outcome && <div className="dt-tag-group"><OutcomeTag state="done" outcome={data.previous_outcome} /></div>}
-      <ReadingCard kind="summary" text={data.previous_summary} title={`${t('teamPreviousAttempt')}${t('labelSeparator')}${t('teamSummary')}`}
-        action={t('teamSummaryRead')} />
+      <ReadingCard kind="summary" text={data.previous_summary} teamId={data.id}
+        title={`${t('teamPreviousAttempt')}${t('labelSeparator')}${t('teamSummary')}`} action={t('teamSummaryRead')} />
     </Section>}
     <Section title={t('teamMembers')} count={TEAM_ROLES.length}>
       <div className="dt-grid3">{TEAM_ROLES.map(role => <MemberCard key={role} team={data} role={role} />)}</div>
     </Section>
     {data.summary && <Section title={t('teamSummary')} badge={<OutcomeTag state={data.state} outcome={data.outcome} />}>
-      <TeamSummaryCard text={data.summary} />
+      <TeamSummaryCard text={data.summary} teamId={data.id} />
     </Section>}
   </>
 }

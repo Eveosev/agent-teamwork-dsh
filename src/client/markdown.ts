@@ -2,10 +2,10 @@
 
 export type Align = 'left' | 'center' | 'right'
 export type Inline = { kind: 'text' | 'bold' | 'code'; text: string } | { kind: 'link'; text: string; url: string }
-  | { kind: 'local'; text: string; path: string }
+  | { kind: 'local'; text: string; path: string } | { kind: 'image'; alt: string; src: string }
 export type Block = { kind: 'heading' | 'paragraph'; text: string } | { kind: 'list'; ordered: boolean; items: string[] }
   | { kind: 'table'; headers: string[]; align: Align[]; rows: string[][] } | { kind: 'code'; language: string; text: string }
-  | { kind: 'rule' }
+  | { kind: 'image'; alt: string; src: string } | { kind: 'rule' }
 
 function shortUrl(url: string): string {
   try {
@@ -20,14 +20,18 @@ export function linkify(text: string): Inline[] {
     ? { kind: 'link', text: shortUrl(part), url: part } : { kind: 'text', text: part })
 }
 export function inlines(text: string): Inline[] {
-  return text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/).flatMap((part): Inline[] => {
+  return text.split(/(\*\*[^*]+\*\*|`[^`]+`|!\[[^\]]*\]\([^)\s]+\)|\[[^\]]+\]\([^)\s]+\))/).flatMap((part): Inline[] => {
     if (/^\*\*[^*]+\*\*$/.test(part)) return [{ kind: 'bold', text: part.slice(2, -2) }]
     if (/^`[^`]+`$/.test(part)) return [{ kind: 'code', text: part.slice(1, -1) }]
+    const image = /^!\[([^\]]*)\]\(([^)\s]+)\)$/.exec(part)
+    if (image) return [{ kind: 'image', alt: image[1]!, src: image[2]! }]
     const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(part)
     if (link) {
       const target = link[2]!
-      // A local path is shown as a labelled reference rather than a navigation target; the panel cannot open it.
-      if (target.startsWith('/') || target.startsWith('file://')) return [{ kind: 'local', text: link[1]!, path: target }]
+      // Local files (absolute or relative to the Team directory) are opened through the authenticated file route.
+      if (target.startsWith('/') || target.startsWith('file://')
+        || /^(?:\.{0,2}\/)?[^:]+?\.(?:md|markdown|txt|json|ya?ml|toml|tsx?|jsx?|py|css|html|sh|log|png|jpe?g|webp|gif|avif)(?:#.*)?$/i.test(target))
+        return [{ kind: 'local', text: link[1]!, path: target }]
       return /^https?:\/\//.test(target) ? [{ kind: 'link', text: link[1]!, url: target }] : [{ kind: 'text', text: part }]
     }
     return linkify(part)
@@ -99,6 +103,12 @@ export function markdownBlocks(text: string): Block[] {
       continue
     }
     list = undefined
+    const image = /^\s*!\[([^\]]*)\]\(\s*(\S+?)\s*\)\s*$/.exec(line)
+    if (image) {
+      blocks.push({ kind: 'image', alt: image[1]!, src: image[2]! })
+      index += 1
+      continue
+    }
     const heading = /^#{1,6}\s+(.*)$/.exec(line)
     blocks.push(heading ? { kind: 'heading', text: heading[1]! } : { kind: 'paragraph', text: line })
     index += 1

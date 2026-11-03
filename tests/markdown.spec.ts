@@ -24,15 +24,22 @@ it('reads a pipe table with alignment, a fenced code block and a horizontal rule
     { kind: 'code', language: 'ts', text: 'const x = 1' }, { kind: 'rule' }])
 })
 
+it('reads a Markdown image as an image, both as a block and inline in text', () => {
+  expect(markdownBlocks('![side panel](review-shot.png)\n')).toEqual([{ kind: 'image', alt: 'side panel', src: 'review-shot.png' }])
+  expect(inlines('See ![side panel](review-shot.png).')).toEqual([{ kind: 'text', text: 'See ' },
+    { kind: 'image', alt: 'side panel', src: 'review-shot.png' }, { kind: 'text', text: '.' }])
+})
+
 it('reads a local path link as a labelled reference rather than a web link', () => {
   expect(inlines('[file](/tmp/a.md)')).toEqual([{ kind: 'local', text: 'file', path: '/tmp/a.md' }])
   expect(inlines('[file](file:///tmp/a.md)')).toEqual([{ kind: 'local', text: 'file', path: 'file:///tmp/a.md' }])
+  expect(inlines('[note](docs/research.md#L74)')).toEqual([{ kind: 'local', text: 'note', path: 'docs/research.md#L74' }])
 })
 
 it('keeps a link to anything but a web address as text, and leaves the punctuation after a bare address out of it', () => {
   for (const text of ['[x](javascript:alert(1))', '[x](data:text/html,<b>hi</b>)']) {
     expect(inlines(text).every(part => part.kind === 'text')).toBe(true)
-    expect(inlines(text).map(part => part.text).join('')).toBe(text)
+    expect(inlines(text).map(part => 'text' in part ? part.text : '').join('')).toBe(text)
   }
   expect(linkify('See https://example.com/a. Then (https://example.com/b) and https://example.com/c?')).toEqual([
     { kind: 'text', text: 'See ' }, { kind: 'link', text: 'example.com/a', url: 'https://example.com/a' }, { kind: 'text', text: '. Then (' },

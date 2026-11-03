@@ -1,5 +1,6 @@
 /** Context-aware shared UI widgets: page/section headers, timestamps, Markdown rendering, and confirmation actions. */
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import type { ApiResponse } from '../app/api.ts'
 import type { SetupProblem } from '../setup.ts'
 import { Button, Icon, InfoTip, Modal, StateDot, type DotState, type IconName } from './controls.tsx'
 import { inlines, linkify, markdownBlocks, type Inline } from './markdown.ts'
@@ -42,29 +43,86 @@ export function KeyValues({ rows }: { rows: [string, ReactNode][] }) {
     style={{ display: 'contents' }}><dt>{key}</dt><dd>{value}</dd></div>)}</dl>
 }
 
-function Inlines({ parts, links = true }: { parts: Inline[]; links?: boolean }) {
+const dataUri = (file: Pick<ApiResponse<'GET teams/:id/file'>, 'mime' | 'data'>): string => `data:${file.mime};base64,${file.data}`
+const decodeText = (data: string): string => {
+  try { return new TextDecoder().decode(Uint8Array.from(atob(data), char => char.charCodeAt(0))) } catch { return '' }
+}
+
+/** A local image in a Team output, fetched through the authenticated Team file route and shown as a data URL. */
+function TeamImage({ src, alt, teamId }: { src: string; alt: string; teamId?: string }) {
+  const { t, call } = usePanel()
+  const [url, setUrl] = useState<string>()
+  const [failed, setFailed] = useState(false)
+  const remote = /^https?:\/\//.test(src)
+  useEffect(() => {
+    if (remote || !teamId) return
+    let live = true
+    setFailed(false); setUrl(undefined)
+    void call('GET teams/:id/file', { id: teamId, query: { path: src } }).then(file => { if (live) setUrl(dataUri(file)) })
+      .catch(() => { if (live) setFailed(true) })
+    return () => { live = false }
+  }, [call, remote, src, teamId])
+  if (remote) return <span className="dt-md-image"><img src={src} alt={alt} loading="lazy" /></span>
+  if (!teamId || failed) return <span className="dt-md-image-fallback" title={src}>{alt || t('imageMarker')}</span>
+  if (!url) return <span className="dt-md-image-fallback">{t('imageMarker')}</span>
+  return <span className="dt-md-image">
+    <a href={url} target="_blank" rel="noopener noreferrer" title={alt || src}><img src={url} alt={alt} loading="lazy" /></a>
+    {alt && <span className="dt-md-image-caption">{alt}</span>}
+  </span>
+}
+
+/** Opens a text or image file from the Team directory in a dialog; paths outside it are refused by the host. */
+function LocalFileLink({ label, path, teamId, enabled }: { label: string; path: string; teamId?: string; enabled: boolean }) {
+  const { t, call, notify } = usePanel()
+  const [open, setOpen] = useState(false)
+  const [file, setFile] = useState<ApiResponse<'GET teams/:id/file'>>()
+  const [busy, setBusy] = useState(false)
+  if (!enabled) return <span className="dt-md-local" title={path}>{label}</span>
+  const openFile = async () => {
+    if (!teamId) { notify(t('fileUnavailable')); return }
+    setBusy(true)
+    try {
+      const target = path.replace(/^file:\/\//, '').split('#')[0]!
+      setFile(await call('GET teams/:id/file', { id: teamId, query: { path: target } }))
+      setOpen(true)
+    } catch (failure) { notify(errorText(failure)) }
+    finally { setBusy(false) }
+  }
+  return <>
+    <button type="button" className="dt-md-local dt-md-local-button" title={path} disabled={busy}
+      onClick={() => { void openFile() }}>{label}</button>
+    {file && <Modal open={open} onClose={() => setOpen(false)} title={file.name} closeLabel={t('close')}
+      className="dt-reading-modal">
+      {file.mime.startsWith('image/') ? <img className="dt-file-image" src={dataUri(file)} alt={file.name} />
+        : <pre className="dt-file-text">{decodeText(file.data)}</pre>}
+    </Modal>}
+  </>
+}
+function Inlines({ parts, links = true, teamId }: { parts: Inline[]; links?: boolean; teamId?: string }) {
   return <>{parts.map((part, index) => part.kind === 'bold' ? <strong key={index}>{part.text}</strong>
     : part.kind === 'code' ? <code key={index} className="dt-code">{part.text}</code>
+    : part.kind === 'image' ? <TeamImage key={index} src={part.src} alt={part.alt} teamId={teamId} />
     : part.kind === 'link' && links ? <a key={index} className="dt-inline-link" href={part.url} title={part.url} {...external}>{part.text}</a>
     : part.kind === 'link' ? <span key={index} className="dt-inline-link">{part.text}</span>
-    : part.kind === 'local' ? <span key={index} className="dt-md-local" title={part.path}>{part.text}</span>
+    : part.kind === 'local' ? <LocalFileLink key={index} label={part.text} path={part.path} teamId={teamId} enabled={links} />
     : <Fragment key={index}>{part.text}</Fragment>)}</>
 }
-/** Renders a safe Markdown subset (headings, lists, paragraphs, tables, code blocks, rules, bold, inline code, links) without raw HTML. */
-export function MarkdownLite({ text, links = true }: { text: string; links?: boolean }) {
+/** Renders a safe Markdown subset (headings, lists, paragraphs, tables, code blocks, rules, bold, inline code, links, and team-local images) without raw HTML. */
+export function MarkdownLite({ text, links = true, teamId }: { text: string; links?: boolean; teamId?: string }) {
   const { t } = usePanel()
-  return <div className="dt-md">{markdownBlocks(readableMarkers(t, text)).map((block, index) => {
+  return <div className="dt-md">{markdownBlocks(readableMarkers(t, text, true)).map((block, index) => {
     if (block.kind === 'rule') return <hr key={index} className="dt-md-rule" />
     if (block.kind === 'code') return <pre key={index} className="dt-md-code"><code>{block.text}</code></pre>
+    if (block.kind === 'image') return <p key={index}><TeamImage src={block.src} alt={block.alt} teamId={teamId} /></p>
     if (block.kind === 'table') return <div key={index} className="dt-md-table-wrap"><table className="dt-md-table">
       <thead><tr>{block.headers.map((header, at) => <th key={at} style={{ textAlign: block.align[at] }}><Inlines
-        parts={inlines(header)} links={links} /></th>)}</tr></thead>
+        parts={inlines(header)} links={links} teamId={teamId} /></th>)}</tr></thead>
       <tbody>{block.rows.map((row, at) => <tr key={at}>{row.map((cell, column) => <td key={column}
-        style={{ textAlign: block.align[column] }}><Inlines parts={inlines(cell)} links={links} /></td>)}</tr>)}</tbody>
+        style={{ textAlign: block.align[column] }}><Inlines parts={inlines(cell)} links={links} teamId={teamId} /></td>)}</tr>)}</tbody>
     </table></div>
     if (block.kind !== 'list') return <p key={index} className={block.kind === 'heading' ? 'dt-md-heading' : undefined}><Inlines
-      parts={inlines(block.text)} links={links} /></p>
-    const items = block.items.map((item, at) => <li key={at}><Inlines parts={inlines(item)} links={links} /></li>)
+      parts={inlines(block.text)} links={links} teamId={teamId} /></p>
+    const items = block.items.map((item, at) => <li key={at}><Inlines parts={inlines(item)} links={links} teamId={teamId} /></li>)
     return block.ordered ? <ol key={index}>{items}</ol> : <ul key={index}>{items}</ul>
   })}</div>
 }

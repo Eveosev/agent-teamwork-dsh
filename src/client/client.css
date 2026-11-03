@@ -405,3 +405,13 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-admission-slot { display: inline-flex; flex: none; width: 16px; }
 .dt-info-warn { color: var(--dsw-alias-state-warn-primary); }
 .dt-field-segmented { max-width: 240px; }
+.dt-md-image { display: inline-flex; flex-direction: column; gap: 4px; max-width: 100%; vertical-align: top; }
+.dt-md-image img { display: block; max-width: 100%; max-height: 420px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 8px; object-fit: contain; }
+.dt-md-image-caption { color: var(--dsw-alias-label-caption); font-size: 11px; line-height: 16px; }
+.dt-md-image-fallback { display: inline-block; padding: 1px 5px; border-radius: 4px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-caption); font-size: 12px; }
+.dt-md-local-button { padding: 0; border: 0; background: none; color: var(--dsw-alias-link); font: inherit; cursor: pointer; text-align: left; }
+.dt-md-local-button:hover { text-decoration: underline; }
+.dt-md-local-button:disabled { opacity: 0.6; cursor: progress; }
+.dt-file-image { display: block; max-width: 100%; max-height: 65vh; margin: 0 auto; object-fit: contain; }
+.dt-file-text { max-height: 65vh; margin: 0; padding: 10px 12px; overflow: auto; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dt-reading-body .dt-md-image img { max-height: 60vh; }

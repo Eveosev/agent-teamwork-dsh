@@ -2,8 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
-import { mkdirSync, statSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { basename, extname, join, resolve, sep } from 'node:path'
 import { key } from '../core/ids.ts'
 import type { Settings } from '../policy.ts'
 import { KV } from '../kv.ts'
@@ -42,6 +42,18 @@ export interface Team { id: string; title: string; task: string; state: TeamStat
 export interface TeamSummary { id: string; title: string; state: TeamState; created_at: string; updated_at: string
   run_started_at?: string; members: { role: TeamRole; state: MemberState }[]; summary?: string; outcome?: TeamOutcome
   rounds?: number; usage?: TeamUsage; continuations?: number; continued_from?: string; continued_from_title?: string }
+/** A readable image or text file from a team's working directory, encoded for the panel preview. */
+export interface TeamFile { name: string; mime: string; data: string }
+const IMAGE_MIMES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif' }
+const TEXT_MIMES: Record<string, string> = { '.md': 'text/markdown; charset=utf-8', '.markdown': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8', '.json': 'application/json; charset=utf-8',
+  '.yaml': 'text/yaml; charset=utf-8', '.yml': 'text/yaml; charset=utf-8', '.toml': 'text/plain; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.jsx': 'text/javascript; charset=utf-8',
+  '.ts': 'text/typescript; charset=utf-8', '.tsx': 'text/typescript; charset=utf-8', '.py': 'text/x-python; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.sh': 'text/x-shellscript; charset=utf-8' }
+const FILE_LIMIT = 8 * 1024 * 1024
+
 /** Context carried from a finished team into a new continuation run. */
 interface Continuation { source: Team; instruction: string }
 
@@ -123,6 +135,27 @@ export class Teams {
   get(id: string): Team | undefined { return this.host.store.get(KV.teams.record(id)) }
   /** Number of teams currently executing. */
   get activeCount(): number { return this.active.size }
+
+  /**
+   * Reads an image or text file referenced by a team output. Only paths that resolve inside the team's working directory
+   * are served; `realpath` rejects symlinks that escape it. Returns undefined for missing, outside, or unsupported files.
+   */
+  readFile(id: string, requested: string): TeamFile | undefined {
+    const team = this.get(id)
+    if (!team) return undefined
+    try {
+      const root = realpathSync(team.directory)
+      const raw = requested.replace(/^file:\/\//, '')
+      const target = realpathSync(raw.startsWith('/') ? raw : resolve(root, raw))
+      if (target !== root && !target.startsWith(`${root}${sep}`)) return undefined
+      const stat = statSync(target)
+      if (!stat.isFile() || stat.size > FILE_LIMIT) return undefined
+      const extension = extname(target).toLowerCase()
+      const mime = IMAGE_MIMES[extension] ?? TEXT_MIMES[extension]
+      if (!mime) return undefined
+      return { name: basename(target), mime, data: readFileSync(target).toString('base64') }
+    } catch { return undefined }
+  }
 
   /** Marks teams left running by a previous process as failed: their subagents cannot be recovered across a restart. */
   recover(): void {
