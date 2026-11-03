@@ -27,6 +27,7 @@
 .dt-list { list-style: none; margin: 0 -8px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .dt-row { position: relative; min-width: 0; border-radius: 12px; padding: 10px 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: flex-start; }
 .dt-row.dt-link:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dt-row.dt-row-reading:hover { background: transparent; }
 .dt-row-main { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .dt-disclosure-body .dt-row-main { flex-basis: 0; }
 .dt-row-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; line-height: 20px; font-weight: 500; }

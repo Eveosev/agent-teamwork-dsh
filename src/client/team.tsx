@@ -107,7 +107,7 @@ function MemberCard({ team, role }: { team: Team; role: TeamRole }) {
 function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<void> }) {
   const { t, call, navigate } = usePanel()
   const running = team.state === 'running'
-  return <li className="dt-row dt-link">
+  return <li className={team.summary ? 'dt-row dt-link dt-row-reading' : 'dt-row dt-link'}>
     <div className="dt-row-main">
       <div className="dt-row-title"><button type="button" className="dt-open"
         onClick={() => navigate({ page: 'team', id: team.id })}>{team.title}</button></div>
