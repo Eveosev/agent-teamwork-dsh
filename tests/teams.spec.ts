@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SettingsSchema } from '../src/policy.ts'
+import { SettingsSchema, type Settings } from '../src/policy.ts'
 import { Teams, TEAM_ROLES, type TeamsHost } from '../src/app/teams.ts'
 
 const settings = (paused = false) => SettingsSchema.parse({ paused, executor: { profiles: {
@@ -7,23 +7,28 @@ const settings = (paused = false) => SettingsSchema.parse({ paused, executor: { 
   developer: { model: { provider: 'llm-center', model: 'deepseek-v4.1-flash-mb' } },
 }, defaultProfile: 'developer' } })
 
-function bench(options: { paused?: boolean; pending?: boolean } = {}) {
+function bench(options: { paused?: boolean; pending?: boolean; modalities?: readonly string[]; custom?: Settings } = {}) {
   const values = new Map<string, unknown>()
-  const runs: { label: string; prompt: string; agentOptions?: unknown; preset?: string; signal: AbortSignal }[] = []
+  const runs: { label: string; prompt: string; blocks: readonly { type: string; text?: string }[]; agentOptions?: unknown; preset?: string
+    signal: AbortSignal }[] = []
   const subagents = { startActivation: vi.fn(async (spec: { label: string; request: { prompt: { type: string; text?: string }[]; agentOptions?: unknown
     agentPreset?: string }; signal: AbortSignal }) => {
-    runs.push({ label: spec.label, prompt: spec.request.prompt.map(block => block.text).join(''), agentOptions: spec.request.agentOptions,
-      preset: spec.request.agentPreset, signal: spec.signal })
+    runs.push({ label: spec.label, prompt: spec.request.prompt.map(block => block.text).join(''), blocks: spec.request.prompt,
+      agentOptions: spec.request.agentOptions, preset: spec.request.agentPreset, signal: spec.signal })
     const result = options.pending ? new Promise<never>(() => {}) : Promise.resolve({ output: [{ type: 'text', text: `${spec.label} result` }],
       stopReason: 'completed' as const })
     return { childId: `child-${runs.length}`, result, dispose: async () => {} }
   }) }
-  const host: TeamsHost = { context: { subagents } as never, masterId: 'master', stateDir: '/tmp/team-state', settings: () => settings(options.paused),
-    logger: { warn: () => {} }, store: { get: key => values.get(key) as never, set: (key, value) => { values.set(key, value) },
-      atomic: <T>(run: () => T) => run() } }
-  return { teams: new Teams(host), runs, subagents }
+  const llm = { resolveModelInfo: vi.fn(async (_provider: string, _model: string) =>
+    options.modalities === undefined ? {} : { inputModalities: options.modalities }) }
+  const host: TeamsHost = { context: { subagents, llm } as never, masterId: 'master', stateDir: '/tmp/team-state',
+    settings: () => options.custom ?? settings(options.paused), logger: { warn: () => {} }, store: { get: key => values.get(key) as never,
+      set: (key, value) => { values.set(key, value) }, atomic: <T>(run: () => T) => run() } }
+  return { teams: new Teams(host), runs, subagents, llm }
 }
 const parent = { id: 'master' } as never
+/** A model-visible image block; the bench never inspects its bytes, only where it lands in each prompt. */
+const image = (id: string) => ({ type: 'image', attachment: { id } }) as never
 
 describe('Teams', () => {
   it('runs the six roles in order, gives each its profile model, and stores the summary', async () => {
@@ -57,6 +62,57 @@ describe('Teams', () => {
   it('refuses to start while processing is paused', () => {
     const { teams } = bench({ paused: true })
     expect(() => teams.create('task', parent)).toThrow('Processing is paused')
+  })
+
+  it('sends attached images after the text block to every role, including both lead runs', async () => {
+    const { teams, runs } = bench()
+    const images = [image('one'), image('two')]
+    const team = teams.create('Describe the screenshots', parent, '', undefined, images)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    expect(runs).toHaveLength(7)
+    for (const run of runs) {
+      expect(run.blocks[0]).toMatchObject({ type: 'text' })
+      expect(run.blocks.slice(1)).toEqual(images)
+    }
+    // Team records stay text-only: the image references only live in the run's prompts.
+    const stored = teams.get(team.id)!
+    expect(stored.task).toBe('Describe the screenshots')
+    expect(JSON.stringify(stored)).not.toContain('attachment')
+  })
+
+  it('sends images only to the roles whose own model accepts them', async () => {
+    const custom = SettingsSchema.parse({ executor: { profiles: {
+      lead: { model: { provider: 'anthropic-gateway', model: 'vision-model' } },
+      developer: { model: { provider: 'llm-center', model: 'text-only-model' } },
+    }, defaultProfile: 'developer' } })
+    const { teams, runs, llm } = bench({ custom })
+    llm.resolveModelInfo.mockImplementation(async (_provider: string, model: string) => ({
+      inputModalities: model === 'vision-model' ? ['text', 'image'] : ['text'] }))
+    const images = [image('one')]
+    const team = teams.create('Describe the screenshot', parent, '', undefined, images)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    expect(runs).toHaveLength(7)
+    // The lead profile uses the vision model; every other role inherits the text-only developer profile.
+    expect(runs.filter(run => run.blocks.length > 1).map(run => run.label.split(' · ')[1])).toEqual(['Team lead', 'Team lead'])
+    for (const run of runs) {
+      if (run.blocks.length > 1) expect(run.blocks.slice(1)).toEqual(images)
+      else expect(run.prompt).toContain('omitted: this role\'s model does not accept image input')
+    }
+    expect(llm.resolveModelInfo).toHaveBeenCalledWith('anthropic-gateway', 'vision-model', expect.any(AbortSignal))
+    expect(llm.resolveModelInfo).toHaveBeenCalledWith('llm-center', 'text-only-model', expect.any(AbortSignal))
+  })
+
+  it('omits images from a role whose model explicitly rejects them and says so in its prompt', async () => {
+    const { teams, runs, llm } = bench({ modalities: ['text'] })
+    const images = [image('one')]
+    const team = teams.create('Describe the screenshot', parent, '', undefined, images)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    expect(llm!.resolveModelInfo).toHaveBeenCalled()
+    expect(runs).toHaveLength(7)
+    for (const run of runs) {
+      expect(run.blocks).toHaveLength(1)
+      expect(run.prompt).toContain('omitted: this role\'s model does not accept image input')
+    }
   })
 
   it('stops a running team, aborting its signal and recording stopped members', async () => {

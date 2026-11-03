@@ -37,6 +37,9 @@ type FakeAgent = {
 const notice = (id: string, text: string) => ({ id, role: 'user', content: [{ type: 'text', text }], source: { kind: 'tool-jobs', form: 'notice' } }) as unknown as UserMessage
 type HttpHandler = (req: unknown, res: unknown) => Promise<void>
 type Delivery = { sessionId: string; mode: 'queue' | 'steer'; id: string; text: string }
+/** One slash command as the Runtime registered it, including the optional attachments an image invocation carries. */
+export type TestCommandDefinition = { name: string; description: string; input?: { hint: string; attachments?: boolean }
+  handler: (invocation: { agent: unknown; rawInput: string; attachments?: readonly { type: string }[] }) => unknown }
 
 /**
  * DSH's job registry as the Executor uses it, with DSH's job tools: the jobs a Session can see, their events, a wait and a
@@ -243,11 +246,14 @@ export async function startRuntime(seed?: (store: Store) => void) {
   const webServer = { host: '127.0.0.1', port: 3082, register: (route: { handler: HttpHandler }) => { http = route.handler; return () => {} } }
   const jobs = jobRegistry(id => agents.get(id))
   const subagents = subagentRuntime(agents)
-  const commandDefinitions = new Map<string, { name: string; description: string; handler: (invocation: { agent: unknown; rawInput: string }) => unknown }>()
-  const commands = { register: vi.fn((definition: { name: string; description: string; handler: (invocation: { agent: unknown; rawInput: string }) => unknown }) => {
+  const commandDefinitions = new Map<string, TestCommandDefinition>()
+  const commands = { register: vi.fn((definition: TestCommandDefinition) => {
     commandDefinitions.set(definition.name, definition); return () => { commandDefinitions.delete(definition.name) }
   }) }
-  const services = { agents, commands, llm: { resolveCallConfig: vi.fn(async (value: unknown) => value) }, sessionController: controller,
+  const llm = { resolveCallConfig: vi.fn(async (value: unknown) => value),
+    resolveModelInfo: vi.fn(async (_provider: string, _model: string, _signal?: AbortSignal): Promise<{ inputModalities?: readonly string[] }> =>
+      ({ inputModalities: ['text', 'image'] })) }
+  const services = { agents, commands, llm, sessionController: controller,
     sessionPersistence: persistence, workspaceRegistry: { create: async (cwd: string) => ({ id: cwd }) }, permissionPresets: { set: () => {} }, subprocess, webServer,
     jobs: jobs.service, subagents: subagents.service }
   const ctx = new Context()
@@ -303,6 +309,6 @@ export async function startRuntime(seed?: (store: Store) => void) {
   /** A step of the worker claims what waits for it, and is cut off before the Session took it. */
   const claim = (sessionId: string) => { claims.get(sessionId)!() }
   return { runtime, ctx, directory, agents, tools, deliveries, relays, candidates, runTool, route, acceptedTicket, api, controller, subprocess, hooks, resolveDefault, stop,
-    jobs, subagents, step, claim, commands: commandDefinitions }
+    jobs, subagents, step, claim, llm, commands: commandDefinitions }
 }
 export type Host = Awaited<ReturnType<typeof startRuntime>>

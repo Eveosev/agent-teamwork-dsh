@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
+import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
@@ -51,6 +52,8 @@ import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
 const now = (): string => new Date().toISOString()
+/** One `/team` outcome; the command handler returns it synchronously unless an image preflight is needed. */
+type TeamCommandResult = { kind: 'success' | 'error'; text?: string }
 
 /**
  * Composition root of dsh-superagent that connects `Store`, `Setup`, `Engine`, `SourceRegistry`, `Effects`, `Outbox`, `Passes`, `Sessions`, `Settings`, `Prompts`, `DshExecutor`, and `MasterAssessor`.
@@ -225,20 +228,44 @@ export class Runtime extends Service implements SourceHost {
   /** Registers `/team`: start, list or stop a six-role team. Registration is optional so headless DSH profiles still start. */
   private registerTeamCommand(): void {
     this.ctx.inject(['commands'], child => {
-      const commands = child.get('commands') as { register(definition: { name: string; description: string; input?: { hint: string };
-        handler: (invocation: { agent: Agent; rawInput: string }) => { kind: 'success' | 'error'; text?: string } }): () => void } | undefined
+      const commands = child.get('commands') as { register(definition: { name: string; description: string;
+        input?: { hint: string; attachments?: boolean };
+        handler: (invocation: { agent: Agent; rawInput: string; attachments?: readonly (ImageBlock | FileBlock)[] }) =>
+          TeamCommandResult | Promise<TeamCommandResult> }): () => void } | undefined
       if (!commands) return
+      const usage = 'Usage: /team [--dir <path>] <task> (+ optional images), /team status, or /team stop <team-id>'
       this.disposers.push(commands.register({ name: 'team', description: 'Start a six-role agent team, or manage running teams',
-        input: { hint: '[--dir <path>] <task> | status | stop <team-id>' }, handler: ({ agent, rawInput }) => {
+        input: { hint: '[--dir <path>] <task> (+ optional images) | status | stop <team-id>', attachments: true },
+        handler: ({ agent, rawInput, attachments = [] }) => {
           const input = rawInput.trim()
-          if (!input) return { kind: 'error', text: 'Usage: /team <task>, /team status, or /team stop <team-id>' }
-          if (input === 'status') return { kind: 'success', text: this.teams.list().map(team => `${team.id} [${team.state}] ${team.title}`).join('\n') || 'No teams yet' }
-          if (input.startsWith('stop ')) { const id = input.slice(5).trim(); return this.teams.stop(id)
-            ? { kind: 'success', text: `Stopping ${id}` } : { kind: 'error', text: `No running team ${id}` } }
+          const images = attachments.filter((block): block is ImageBlock => block.type === 'image')
+          if (input === 'status' || input.startsWith('stop ')) {
+            const subcommand = input === 'status' ? 'status' : 'stop'
+            if (attachments.length) return { kind: 'error', text: `/team ${subcommand} does not accept attachments` }
+            if (input === 'status') return { kind: 'success',
+              text: this.teams.list().map(team => `${team.id} [${team.state}] ${team.title}`).join('\n') || 'No teams yet' }
+            const id = input.slice(5).trim()
+            return this.teams.stop(id) ? { kind: 'success', text: `Stopping ${id}` } : { kind: 'error', text: `No running team ${id}` }
+          }
+          if (attachments.some(block => block.type === 'file')) return { kind: 'error',
+            text: '/team accepts images as attachments only; remove the file attachment and retry' }
+          if (!input && !images.length) return { kind: 'error', text: usage }
           const directory = /^--dir\s+(\S+)\s+([\s\S]+)$/.exec(input)
-          const task = directory ? directory[2]!.trim() : input
-          try { const team = this.teams.create(task, agent, '', directory?.[1]); return { kind: 'success', text: `Team ${team.id} started in ${team.directory}: ${team.title}` } }
-          catch (error) { return { kind: 'error', text: String(error) } }
+          // The team record keeps text only; an image-only invocation gets a neutral task and title.
+          const task = (directory ? directory[2]!.trim() : input) || 'Work from the attached images.'
+          const title = input ? '' : 'Image task'
+          const start = (): TeamCommandResult => {
+            try {
+              const team = this.teams.create(task, agent, title, directory?.[1], images)
+              const attached = images.length ? ` (${images.length} image${images.length === 1 ? '' : 's'} attached)` : ''
+              return { kind: 'success', text: `Team ${team.id} started in ${team.directory}: ${team.title}${attached}` }
+            } catch (error) { return { kind: 'error', text: String(error) } }
+          }
+          if (!images.length) return start()
+          // Refuse images the lead could never see instead of dropping them silently after the team has started.
+          return this.teams.leadImageCapability(agent).then((capability): TeamCommandResult => capability && !capability.supported
+            ? { kind: 'error', text: `Team lead model ${capability.model} does not support image input; remove the image(s) or configure a vision-capable lead model` }
+            : start())
         } }))
     })
   }

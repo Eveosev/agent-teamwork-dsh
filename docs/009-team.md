@@ -9,6 +9,7 @@ In any DSH chat (the invoking Session becomes the team's parent):
 ```text
 /team Add a health endpoint and a test for it
 /team --dir /Users/me/projects/agent-teamwork Add a health endpoint and a test for it
+/team Fix the layout shown in the attached screenshot   (attach the image in the composer)
 /team status
 /team stop team-<id>
 ```
@@ -16,6 +17,18 @@ In any DSH chat (the invoking Session becomes the team's parent):
 The team works in the **Team working directory** from Execution settings, or `--dir <path>` for one run. The default is `<stateDir>/team`; set the setting to the target repository checkout (for example `/Users/me/Vibe/agent-teamwork`) before starting a team that should edit that repository.
 
 The command does not create a Ticket and does not go through Eval or Policy: it is a direct human command. It is refused while processing is paused, and the number of concurrent teams is limited to the smaller of three and `executor.maxWorkers`. A team can also be started from the **Team** tab in the panel.
+
+### Images
+
+Attach one or more PNG/JPEG/WebP/GIF images to the composer before sending `/team ...`; DSH's attachment admission applies the format, size and count limits. An invocation with only images (no task text) also works: the task becomes `Work from the attached images.` and the title `Image task`.
+
+- Every role receives the images after its task text, in submission order. The lead's two runs (plan and synthesis) receive them too, so the plan and final summary can use what the images show.
+- The lead's model must declare `image` input. If the catalog explicitly says it does not, the command returns an error and no team is created. A role whose model explicitly rejects images is run with the task text plus a note instead of the image; it is not failed.
+- Each role gets its own copy of the images, so visual token cost multiplies across the up-to-seven role calls. Attach only the images the task needs.
+- Images live only in the run's prompts. The Team record stores text, not image bytes, so re-attach images when starting a new team.
+- `status` and `stop` do not accept attachments, and file attachments are refused; both errors keep the composer draft.
+
+The panel's Team form and `POST /teams` still accept text only; image input is currently a chat-composer feature.
 
 ## Roles and flow
 
