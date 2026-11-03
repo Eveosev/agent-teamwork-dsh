@@ -36,7 +36,7 @@ export interface HttpHost {
   readonly sources: SourceRegistry
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'ensure'>
-  readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'stop' | 'activeCount'>
+  readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'continueTeam' | 'stop' | 'activeCount'>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount'>
@@ -151,6 +151,7 @@ const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), Sou
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
 const TeamCreateRequest = z.object({ task: z.string().trim().min(1).max(8000), title: z.string().trim().max(120).optional(),
   directory: z.string().trim().min(1).optional() }).strict()
+const TeamContinueRequest = z.object({ instruction: z.string().trim().max(8000).optional() }).strict()
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
@@ -200,6 +201,17 @@ function routes(runtime: HttpHost): Routes {
       if (runtime.teams.activeCount >= limit) throw new RouteError(400, `At most ${limit} teams run at once; wait for one to finish`)
       const agent = await runtime.sessions.ensure(runtime.masterId, runtime.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
       return { team: runtime.teams.create(request.task, agent, request.title ?? '', request.directory) }
+    },
+    'POST teams/:id/continue': async ({ params, body }) => {
+      const source = team(params.id)
+      const request = TeamContinueRequest.parse(await body())
+      const settings = store.settings()
+      if (settings.paused) throw new RouteError(400, 'Processing is paused; resume it before continuing a team')
+      if (source.state === 'running') throw new RouteError(400, 'Team is still running; wait for it to finish before continuing')
+      const limit = Math.min(3, Math.max(1, settings.executor.maxWorkers))
+      if (runtime.teams.activeCount >= limit) throw new RouteError(400, `At most ${limit} teams run at once; wait for one to finish`)
+      const agent = await runtime.sessions.ensure(runtime.masterId, runtime.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
+      return { team: runtime.teams.continueTeam(source.id, agent, request.instruction ?? '') }
     },
     'POST teams/:id/stop': ({ params }) => { team(params.id); return { stopped: runtime.teams.stop(params.id) } },
     'GET tickets': ({ query }) => {

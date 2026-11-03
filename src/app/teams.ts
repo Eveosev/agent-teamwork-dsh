@@ -36,9 +36,12 @@ export interface TeamMember { role: TeamRole; profile: string | null; state: Mem
 /** A durable team record, listed and inspected by the panel. */
 export interface Team { id: string; title: string; task: string; state: TeamState; created_at: string; updated_at: string
   parent_session_id: string; directory: string; members: TeamMember[]; summary?: string; error?: string; outcome?: TeamOutcome
-  rounds?: number; usage?: TeamUsage }
+  rounds?: number; usage?: TeamUsage; continued_from?: string; continued_from_title?: string; continuation?: string }
 export interface TeamSummary { id: string; title: string; state: TeamState; created_at: string; updated_at: string
-  members: { role: TeamRole; state: MemberState }[]; summary?: string; outcome?: TeamOutcome; rounds?: number; usage?: TeamUsage }
+  members: { role: TeamRole; state: MemberState }[]; summary?: string; outcome?: TeamOutcome; rounds?: number; usage?: TeamUsage
+  continued_from?: string; continued_from_title?: string }
+/** Context carried from a finished team into a new continuation run. */
+interface Continuation { source: Team; instruction: string }
 
 /** Structural subset of DSH's subagent service, kept local so the bundle does not depend on the package at build time. */
 interface Activation { childId: string; result: Promise<{ output: readonly { type: string; text?: string }[]; stopReason: string; diagnostic?: string }>
@@ -103,7 +106,9 @@ export class Teams {
     return ids.flatMap(id => { const team = this.get(id); return team ? [{ id: team.id, title: team.title, state: team.state,
       created_at: team.created_at, updated_at: team.updated_at, members: team.members.map(member => ({ role: member.role,
         state: member.state })), ...team.summary ? { summary: team.summary } : {}, ...team.outcome ? { outcome: team.outcome } : {},
-      ...team.rounds ? { rounds: team.rounds } : {}, ...team.usage ? { usage: team.usage } : {} }] : [] })
+      ...team.rounds ? { rounds: team.rounds } : {}, ...team.usage ? { usage: team.usage } : {},
+      ...team.continued_from ? { continued_from: team.continued_from } : {},
+      ...team.continued_from_title ? { continued_from_title: team.continued_from_title } : {} }] : [] })
   }
   /** Reads one team, or undefined when the id is unknown. */
   get(id: string): Team | undefined { return this.host.store.get(KV.teams.record(id)) }
@@ -132,8 +137,24 @@ export class Teams {
     return supported === undefined ? undefined : { model: route.model, supported }
   }
 
-  /** Creates and starts a team for `task`, sending any attached images to every role; refuses while paused or when too many teams already run. */
+  /**
+   * Creates and starts a team for `task`, sending any attached images to every role; refuses while paused or when too many
+   * teams already run. A continuation keeps its source record untouched and starts a linked run in the same directory.
+   */
   create(task: string, parent?: Agent, title = '', requestedDirectory?: string, images: readonly ImageBlock[] = []): Team {
+    return this.start(task, parent, title, requestedDirectory, images)
+  }
+
+  /** Starts a linked run from a finished team, using its task, title, directory and evidence, plus an optional instruction. */
+  continueTeam(id: string, parent?: Agent, instruction = ''): Team {
+    const source = this.get(id)
+    if (!source) throw new Error(`Team not found: ${id}`)
+    if (source.state === 'running') throw new Error('Team is still running; wait for it to finish before continuing')
+    return this.start(source.task, parent, source.title, source.directory, [], { source, instruction: instruction.trim() })
+  }
+
+  private start(task: string, parent: Agent | undefined, title: string, requestedDirectory: string | undefined,
+    images: readonly ImageBlock[], continuation?: Continuation): Team {
     const settings = this.host.settings()
     if (settings.paused) throw new Error('Processing is paused; resume it before starting a team')
     const limit = Math.min(MAX_ACTIVE_TEAMS, Math.max(1, settings.executor.maxWorkers))
@@ -144,15 +165,17 @@ export class Teams {
     mkdirSync(directory, { recursive: true, mode: 0o700 })
     if (!statSync(directory).isDirectory()) throw new Error(`Team directory is not a directory: ${directory}`)
     const at = new Date().toISOString()
-    const id = `team-${key('team', task, agent.id, at)}`
+    const id = `team-${key('team', task, agent.id, at, continuation?.source.id ?? '')}`
     const profiles = settings.executor.profiles
     const team: Team = { id, title: (title.trim() || task.trim().split('\n')[0]!.slice(0, 80)) || 'Agent team', task, state: 'running',
       created_at: at, updated_at: at, parent_session_id: agent.id, directory, members: TEAM_ROLES.map(role => ({ role,
-        profile: profiles[role] ? role : settings.executor.defaultProfile ?? null, state: 'idle' })) }
+        profile: profiles[role] ? role : settings.executor.defaultProfile ?? null, state: 'idle' })),
+      ...continuation ? { continued_from: continuation.source.id, continued_from_title: continuation.source.title } : {},
+      ...continuation?.instruction ? { continuation: continuation.instruction } : {} }
     this.save(team, true)
     const controller = new AbortController()
     this.active.set(id, controller)
-    void this.execute(team, agent, controller.signal, images).catch(error => {
+    void this.execute(team, agent, controller.signal, images, continuation).catch(error => {
       this.finish(team, 'failed', String(error).slice(0, 1000))
     }).finally(() => { this.active.delete(id) })
     return team
@@ -311,9 +334,25 @@ export class Teams {
     return roles.flatMap(role => { const member = this.member(team, role); return member.output ? `## ${TEAM_ROLE_LABELS[role]}\n${member.output}` : [] }).join('\n\n')
   }
 
-  private async execute(team: Team, parent: Agent, signal: AbortSignal, images: readonly ImageBlock[] = []): Promise<void> {
+  /** The prior attempt's summary and the user's request, given to the lead and developer of a continuation run. */
+  private continuationContext(continuation: Continuation): string {
+    const source = continuation.source
+    const evidence = source.summary ?? this.contextOf(source, TEAM_ROLES)
+    return [
+      `This run continues an earlier attempt (${source.id}) that ended as ${source.outcome ?? 'unverified'}.`,
+      `Previous attempt evidence:\n${clip(evidence)}`,
+      continuation.instruction ? `The user's additional instruction:\n${continuation.instruction}`
+        : 'The user gave no additional instruction; finish the original task.',
+      'The working directory still contains the previous attempt. Inspect the current state and continue it instead of starting over.',
+    ].join('\n\n')
+  }
+
+  private async execute(team: Team, parent: Agent, signal: AbortSignal, images: readonly ImageBlock[] = [],
+    continuation?: Continuation): Promise<void> {
     const task = team.task
-    const plan = await this.run(team, 'lead', `${task}\n\nFirst produce the plan only; the team implements after it.`, parent, signal, images)
+    const background = continuation ? this.continuationContext(continuation) : ''
+    const plan = await this.run(team, 'lead', `${task}\n\n${background ? `${background}\n\n` : ''}First produce the plan only; the team implements after it.`,
+      parent, signal, images)
     if (signal.aborted) return
     let round = 1
     let history = ''
@@ -324,7 +363,8 @@ export class Teams {
       if (round === 1) {
         await Promise.all([
           this.run(team, 'researcher', `${task}\n\nPlan:\n${plan}\n\nGather the repository and external context the implementer needs.`, parent, signal, images, round),
-          this.run(team, 'developer', `${task}\n\nPlan:\n${plan}\n\nImplement the task now.`, parent, signal, images, round),
+          this.run(team, 'developer', `${task}\n\nPlan:\n${plan}\n\n${background ? `${background}\n\n` : ''}Implement the task now.`,
+            parent, signal, images, round),
         ])
       } else {
         const previous = this.contextOf(team, ['researcher', 'developer'])

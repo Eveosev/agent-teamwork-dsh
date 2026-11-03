@@ -69,6 +69,14 @@ A Team record holds the task, title, timestamps, parent Session, each member's p
 
 The team output is evidence for a person, not an automatic merge: review the summary, the child Sessions and the diff before shipping.
 
+## Continuing a finished team
+
+A terminal team (done, failed or stopped) has a **继续执行** / **Continue** entry in the panel list and detail page. It opens a dialog for an optional instruction and starts a new, linked run with the same task, title and working directory. The original record is not reopened or rewritten: its outcome, summary, members and token usage stay available for audit.
+
+The new Team records `continued_from`, `continued_from_title` and the optional `continuation` text, and the UI links back to the source. The lead and developer receive the source summary (or its latest role outputs when there is no summary) plus the instruction, and are told that the working directory still contains the previous attempt. Verification, automatic repair, outcome and token accounting then run exactly as for a fresh team.
+
+Continuation requires the source to be terminal, processing to be unpaused, and an available team slot. Attached images are not carried into the continuation because Team records store text only; add them through a new `/team` invocation when needed.
+
 ## API
 
 The panel uses the same routes:
@@ -77,6 +85,7 @@ The panel uses the same routes:
 GET  /orchestrator/api/teams                 -> { items: TeamSummary[], active: number }
 GET  /orchestrator/api/teams/:id             -> Team
 POST /orchestrator/api/teams                 { task, title?, directory? } -> { team }
+POST /orchestrator/api/teams/:id/continue    { instruction? } -> { team }
 POST /orchestrator/api/teams/:id/stop        -> { stopped: boolean }
 ```
 

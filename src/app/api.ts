@@ -34,6 +34,7 @@ export interface Api {
   'GET teams': { response: { items: TeamSummary[]; active: number } }
   'GET teams/:id': { response: Team }
   'POST teams': { body: { task: string; title?: string; directory?: string }; response: { team: Team } }
+  'POST teams/:id/continue': { body: { instruction?: string }; response: { team: Team } }
   'POST teams/:id/stop': { response: { stopped: boolean } }
   'GET tickets': { query?: Paged & { state?: TicketFilter }; response: TicketListView }
   'GET tickets/:id': { response: TicketPageView }

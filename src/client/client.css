@@ -56,6 +56,8 @@
 .dt-team-dots .dt-dot { margin-top: 0; }
 .dt-inline-link { position: relative; z-index: 1; color: var(--dsw-alias-link); text-decoration: none; }
 .dt-inline-link:hover { text-decoration: underline; }
+.dt-inline-button { position: relative; z-index: 1; padding: 0; border: 0; background: none; color: var(--dsw-alias-link); font: inherit; cursor: pointer; }
+.dt-inline-button:hover { text-decoration: underline; }
 .dt-textlink { padding: 0; border: 0; background: none; font: inherit; color: var(--dsw-alias-link); cursor: pointer; text-align: left; }
 .dt-textlink:hover { text-decoration: underline; }
 .dt-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; line-height: 20px; }

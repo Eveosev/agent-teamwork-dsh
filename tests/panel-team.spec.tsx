@@ -51,6 +51,22 @@ it('starts a team from the form and opens the new team', async () => {
   expect(all('.dt-grid3 .dt-card').length).toBe(6)
 })
 
+it('continues a finished team from its page with an optional instruction', async () => {
+  at({ page: 'team', id: 'team-2' })
+  await mount()
+  await click(zh.teamContinue)
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(zh.teamContinueTitle)
+  await type(field<HTMLTextAreaElement>(zh.teamContinuation), 'Fix the remaining check')
+  await click(zh.teamContinueStart)
+  expect(server.requests.find(request => request.path === 'teams/team-2/continue' && request.method === 'POST'))
+    .toMatchObject({ body: { instruction: 'Fix the remaining check' } })
+  expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('发布检查')
+  expect(text()).toContain(zh.teamContinuedFrom)
+  expect(text()).toContain(zh.teamContinuation)
+  expect(text()).toContain('Fix the remaining check')
+  expect(all('.dt-grid3 .dt-card').length).toBe(6)
+})
+
 it('stops a running team from the list after confirmation', async () => {
   await mount()
   await click(tab(zh['tab.team']))

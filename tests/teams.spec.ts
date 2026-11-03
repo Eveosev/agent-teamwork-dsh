@@ -72,6 +72,36 @@ describe('Teams', () => {
     expect(teams.activeCount).toBe(0)
   })
 
+  it('continues a finished team with its previous evidence and keeps the original record', async () => {
+    const { teams, runs } = bench()
+    const first = teams.create('Finish the Chrome extension', parent)
+    await vi.waitFor(() => expect(teams.get(first.id)?.state).toBe('done'))
+    const before = teams.get(first.id)!
+    const next = teams.continueTeam(first.id, parent, 'Fix the remaining tab grouping issue')
+    expect(next.id).not.toBe(first.id)
+    await vi.waitFor(() => expect(teams.get(next.id)?.state).toBe('done'))
+    const source = teams.get(first.id)!
+    const stored = teams.get(next.id)!
+    expect(source).toMatchObject({ state: 'done', outcome: 'achieved', summary: before.summary })
+    expect(stored).toMatchObject({ task: first.task, title: first.title, directory: first.directory,
+      continued_from: first.id, continued_from_title: first.title, continuation: 'Fix the remaining tab grouping issue',
+      outcome: 'achieved' })
+    expect(teams.list()[0]?.id).toBe(next.id)
+    expect(runs).toHaveLength(14)
+    expect(runs[7]!.prompt).toContain('Previous attempt evidence:')
+    expect(runs[7]!.prompt).toContain('Fix the remaining tab grouping issue')
+    expect(runs[9]!.prompt).toContain('instead of starting over')
+  })
+
+  it('refuses to continue a running team or an unknown team', async () => {
+    const { teams, runs } = bench({ pending: true })
+    const team = teams.create('Still running', parent)
+    await vi.waitFor(() => expect(runs.length).toBeGreaterThan(0))
+    expect(() => teams.continueTeam(team.id, parent)).toThrow('still running')
+    expect(() => teams.continueTeam('missing', parent)).toThrow('Team not found')
+    teams.stop(team.id)
+  })
+
   it('re-dispatches a failed verification through the lead and passes on the next round', async () => {
     const { teams, runs } = bench({ failFirst: true })
     const team = teams.create('Add the settings page', parent)

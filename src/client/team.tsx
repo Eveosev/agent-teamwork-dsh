@@ -147,6 +147,7 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
       <div className="dt-row-meta">
         <Tag tone={teamTone(team.state)}>{teamStateLabel(t, team.state)}</Tag>
         <OutcomeTag state={team.state} outcome={team.outcome} />
+        {team.continued_from && <Tag tone="info" title={`${t('teamContinuedFrom')}: ${team.continued_from_title ?? team.continued_from}`}>{t('teamContinued')}</Tag>}
         <LabelValue label={t('teamProgress')} value={`${doneCount(team.members)}/${TEAM_ROLES.length}`} />
         <LabelValue label={t('teamCreated')} value={<When at={team.created_at} />} />
         {team.rounds && <LabelValue label={t('teamRounds')} value={team.rounds} />}
@@ -158,12 +159,42 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
       </div>
       {team.summary && <TeamSummaryCard text={team.summary} />}
     </div>
-    {running && <div className="dt-row-actions">
-      <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
+    <div className="dt-row-actions">
+      {running ? <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
         message={t('teamStopConfirm', { title: team.title })}
         onConfirm={async () => { await call('POST teams/:id/stop', { id: team.id }); await reload() }} />
-    </div>}
+        : <ContinueTeamButton team={team} />}
+    </div>
   </li>
+}
+
+/** Start a linked run from a finished team; the source record stays intact. */
+function ContinueTeamButton({ team }: { team: { id: string; title: string } }) {
+  const { t, call, navigate } = usePanel()
+  const [open, setOpen] = useState(false)
+  const [instruction, setInstruction] = useState('')
+  const start = useAction(async () => {
+    const body = instruction.trim() ? { instruction: instruction.trim() } : {}
+    const { team: started } = await call('POST teams/:id/continue', { id: team.id, body })
+    setOpen(false); setInstruction('')
+    navigate({ page: 'team', id: started.id })
+  })
+  const fieldId = `dt-team-continue-${team.id}`
+  return <>
+    <Button variant="outline" size="sm" icon={<Icon name="play" size={14} />} onClick={() => setOpen(true)}>{t('teamContinue')}</Button>
+    <Modal open={open} onClose={() => setOpen(false)} title={t('teamContinueTitle')} closeLabel={t('close')}
+      description={t('teamContinueHint')}
+      footer={<>
+        <Button variant="ghost" onClick={() => setOpen(false)}>{t('cancel')}</Button>
+        <Button variant="primary" disabled={start.busy} onClick={() => { void start.run() }}>{t('teamContinueStart')}</Button>
+      </>}>
+      <div className="dt-field">
+        <label htmlFor={fieldId}>{t('teamContinuation')}</label>
+        <textarea id={fieldId} className="dt-textarea" rows={4} value={instruction}
+          placeholder={t('teamContinuePlaceholder')} onChange={event => setInstruction(event.target.value)} />
+      </div>
+    </Modal>
+  </>
 }
 
 /** Team tab root: the active team count, a compact start form, and every team newest first. */
@@ -230,7 +261,7 @@ function TeamSummaryCard({ text }: { text: string }) {
 
 /** Team detail: state and duration, the task, six role cards, and the lead's final summary. */
 export function TeamPage({ id }: { id: string }) {
-  const { t, call } = usePanel()
+  const { t, call, navigate } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET teams/:id', { id }), [id])
   if (!data) return <>
     <PageHead title={t('tab.team')} />
@@ -250,15 +281,20 @@ export function TeamPage({ id }: { id: string }) {
         value={durationText(t, data.created_at, end)} />
       {data.rounds && <LabelValue label={t('teamRounds')} value={data.rounds} />}
       {data.usage && <TokenUsageLine usage={data.usage} />}
+      {data.continued_from && <LabelValue label={t('teamContinuedFrom')} value={
+        <button type="button" className="dt-inline-button" onClick={() => navigate({ page: 'team', id: data.continued_from! })}>
+          {data.continued_from_title ?? data.continued_from}</button>} />}
       <LabelValue label={t('teamDirectory')} value={<span className="dt-mono">{data.directory}</span>} />
-      {running && <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
+      {running ? <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
         message={t('teamStopConfirm', { title: data.title })}
-        onConfirm={async () => { await call('POST teams/:id/stop', { id }); await reload() }} />}
+        onConfirm={async () => { await call('POST teams/:id/stop', { id }); await reload() }} />
+        : <ContinueTeamButton team={data} />}
     </div>
     {data.error && <p className="dt-banner dt-danger dt-mono">
       <span className="dt-banner-label">{t('teamError')}{t('labelSeparator')}</span>{data.error}
     </p>}
     <Section title={t('teamTask')}><div className="dt-event-text">{data.task}</div></Section>
+    {data.continuation && <Section title={t('teamContinuation')}><div className="dt-event-text">{data.continuation}</div></Section>}
     <Section title={t('teamMembers')} count={TEAM_ROLES.length}>
       <div className="dt-grid3">{TEAM_ROLES.map(role => <MemberCard key={role} team={data} role={role} />)}</div>
     </Section>

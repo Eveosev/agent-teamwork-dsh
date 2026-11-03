@@ -236,7 +236,9 @@ function threadPage(key: string, { before, around }: { before?: string; around?:
 const TEAM_ROLE_NAMES = ['lead', 'researcher', 'developer', 'tester', 'reviewer', 'ops'] as const
 const teamSummary = (team: Team): TeamSummary => ({ id: team.id, title: team.title, state: team.state, created_at: team.created_at,
   updated_at: team.updated_at, members: team.members.map(({ role, state }) => ({ role, state })), ...team.summary ? { summary: team.summary } : {},
-  ...team.outcome ? { outcome: team.outcome } : {}, ...team.rounds ? { rounds: team.rounds } : {}, ...team.usage ? { usage: team.usage } : {} })
+  ...team.outcome ? { outcome: team.outcome } : {}, ...team.rounds ? { rounds: team.rounds } : {}, ...team.usage ? { usage: team.usage } : {},
+  ...team.continued_from ? { continued_from: team.continued_from } : {},
+  ...team.continued_from_title ? { continued_from_title: team.continued_from_title } : {} })
 const teamMember = (role: TeamMember['role'], state: TeamMember['state'], extra: Partial<TeamMember> = {}): TeamMember =>
   ({ role, profile: null, state, ...extra })
 function teamFixtures(): PanelServer['teams'] {
@@ -370,6 +372,19 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
       title: body.title?.trim() || body.task.trim().split('\n')[0]!.slice(0, 80) || 'Agent team', task: body.task,
       state: 'running', created_at: at, updated_at: at, parent_session_id: 'master', directory: body.directory ?? '/tmp/team',
       members: TEAM_ROLE_NAMES.map(role => teamMember(role, 'idle')) }
+    server.teams.items = [teamSummary(team), ...server.teams.items]
+    server.teams.details[team.id] = team
+    return { team }
+  } },
+  'POST teams/:id/continue': { body: true, answer: ({ params, body }) => {
+    const source = server.teams.details[params.id]
+    if (!source) return refuse(404, `No team ${params.id}`)
+    if (source.state === 'running') return refuse(400, 'Team is still running; wait for it to finish before continuing')
+    const at = new Date().toISOString()
+    const team: Team = { id: `team-${server.teams.items.length + 1}`, title: source.title, task: source.task, state: 'running',
+      created_at: at, updated_at: at, parent_session_id: source.parent_session_id, directory: source.directory,
+      members: TEAM_ROLE_NAMES.map(role => teamMember(role, 'idle')), continued_from: source.id, continued_from_title: source.title,
+      ...body.instruction?.trim() ? { continuation: body.instruction.trim() } : {} }
     server.teams.items = [teamSummary(team), ...server.teams.items]
     server.teams.details[team.id] = team
     return { team }
