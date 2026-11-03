@@ -44,6 +44,16 @@ describe('Teams', () => {
     expect(teams.activeCount).toBe(0)
   })
 
+  it('requires the reviewer to provide screenshot evidence for visually verifiable design', async () => {
+    const { teams, runs } = bench()
+    const team = teams.create('Review the new settings page design', parent)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    const reviewer = runs.find(run => run.label.endsWith('Reviewer'))!
+    expect(reviewer.prompt).toContain('product or feature design')
+    expect(reviewer.prompt).toContain('real screenshot')
+    expect(reviewer.prompt).toContain('mark the visual acceptance check unverified')
+  })
+
   it('refuses to start while processing is paused', () => {
     const { teams } = bench({ paused: true })
     expect(() => teams.create('task', parent)).toThrow('Processing is paused')

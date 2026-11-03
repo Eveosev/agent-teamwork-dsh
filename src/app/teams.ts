@@ -21,7 +21,7 @@ const ROLE_INSTRUCTIONS: Record<TeamRole, string> = {
   researcher: 'You research the repository and, when needed, the web. Return concise facts with file paths and links. Do not edit files.',
   developer: 'You implement the task in the working directory. Keep the change scoped, run the relevant checks, and report the changed files and commands.',
   tester: 'You test the implementation. Add or adjust tests only where needed, run them, and report the exact commands and results. Do not change product code unless the task requires it.',
-  reviewer: 'You review the implementation against the task and the repository conventions. Do not edit files. Report findings by severity with file and line references.',
+  reviewer: 'You review the implementation against the task and the repository conventions. Do not edit source files. For a product or feature design whose result can be verified visually (UI, layout, interaction or rendered output), capture a real screenshot of the implemented result with the available browser or screenshot tooling, save it under the working directory, and include its absolute path as evidence. If a screenshot cannot be captured, say why and mark the visual acceptance check unverified. Report findings by severity with file and line references.',
   ops: 'You inspect CI, logs and deployment state. Run read-only commands; do not edit the repository. Report failures and the command that showed them.',
 }
 
@@ -195,7 +195,7 @@ export class Teams {
     const work = this.contextOf(team, ['lead', 'researcher', 'developer'])
     await Promise.all([
       this.run(team, 'tester', `${task}\n\n${work}\n\nTest the implementation and report the commands and results.`, parent, signal),
-      this.run(team, 'reviewer', `${task}\n\n${work}\n\nReview the implementation and report findings; do not edit.`, parent, signal),
+      this.run(team, 'reviewer', `${task}\n\n${work}\n\nReview the implementation and report findings; do not edit. If the task is a product or feature design that can be verified visually, include a real screenshot and its path as evidence.`, parent, signal),
     ])
     if (signal.aborted) return
     await this.run(team, 'ops', `${task}\n\n${work}\n\nInspect CI and repository status; do not edit.`, parent, signal)

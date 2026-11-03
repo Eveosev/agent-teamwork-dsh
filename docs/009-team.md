@@ -25,10 +25,12 @@ The command does not create a Ticket and does not go through Eval or Policy: it 
 | `researcher` | Reads the repository and external sources; returns facts and links | `glm-5.3-mb` |
 | `developer` | Implements the task in the working directory | `glm-5.3-mb` |
 | `tester` | Adds/adjusts tests, runs them, reports commands and results | `deepseek-v4.1-flash-mb` |
-| `reviewer` | Reviews the implementation; read-only | `deepseek-v4.1-flash-mb` |
+| `reviewer` | Reviews the implementation; captures screenshot evidence for visually verifiable product/feature design; read-only | `deepseek-v4.1-flash-mb` |
 | `ops` | Inspects CI and deployment state; read-only | `glm-5.3-mb` |
 
 The runtime runs: lead plan → researcher and developer in parallel → tester and reviewer in parallel → ops → lead synthesis. Each role except the lead is started once; the lead runs twice with the same profile. A member failure is recorded as evidence and does not cancel the other roles.
+
+When the deliverable is a product or feature design that can be verified visually, the reviewer must capture a real screenshot of the implemented result and cite its path in the review. A code-only review is not visual acceptance; if a screenshot cannot be captured, the reviewer says why and marks that check unverified.
 
 The role's model, Agent preset and extra instructions come from the worker profile whose id equals the role name (`lead`, `researcher`, `developer`, `tester`, `reviewer`, `ops`). If that profile does not exist, the role uses `defaultProfile` or the executor model. See `docs/worker-profiles.md`.
 

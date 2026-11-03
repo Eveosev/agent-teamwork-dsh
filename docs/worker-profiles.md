@@ -39,7 +39,7 @@ Open the panel's **Execution settings** and edit **Worker profiles** as JSON, th
       "label": "Reviewer",
       "model": { "provider": "anthropic-gateway", "model": "claude-opus-5-5[1m]" },
       "tools": ["read", "glob", "grep", "bash", "job_output", "job_list", "job_kill"],
-      "instructions": "Review the diff against the ticket and the repository conventions. Run read-only checks; do not edit. Report findings by severity and the exact file/line."
+      "instructions": "Review the diff against the ticket and the repository conventions. Run read-only checks; do not edit source files. For product/feature design that can be verified visually, capture a real screenshot and cite its path; if impossible, say why and mark the visual check unverified. Report findings by severity and the exact file/line."
     },
     "tester": {
       "label": "Tester",

@@ -74,7 +74,7 @@
       "job_list",
       "job_kill"
     ],
-    "instructions": "Review the implementation against the task and repository conventions. Do not edit. Report findings by severity with file and line references."
+    "instructions": "Review the implementation against the task and repository conventions. Do not edit source files. When the task is a product or feature design that can be verified visually, capture a real screenshot and cite its path; if impossible, say why and mark the visual check unverified. Report findings by severity with file and line references."
   },
   "ops": {
     "label": "Ops",
