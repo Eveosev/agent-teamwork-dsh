@@ -81,7 +81,6 @@ export interface TeamsHost { context: Context; store: Pick<Store, 'get' | 'set' 
   logger: { warn(message: string): void } }
 const MAX_ACTIVE_TEAMS = 3
 /** At most this many implementation/verification rounds, including the first; later rounds are lead-directed repairs. */
-const MAX_ROUNDS = 3
 const OUTPUT_LIMIT = 24_000
 const clip = (text: string): string => text.length <= OUTPUT_LIMIT ? text : `${text.slice(0, OUTPUT_LIMIT)}\n… [truncated]`
 const textOf = (blocks: readonly { type: string; text?: string }[]): string => blocks.filter(block => block.type === 'text' && block.text)
@@ -504,6 +503,7 @@ export class Teams {
     const task = team.task
     const background = continuation ? this.continuationContext(continuation) : ''
     const notice = continuation ? this.continuationNote(continuation) : ''
+    const maxRounds = this.host.settings().executor.maxRounds
     const plan = await this.run(team, 'lead', `${task}\n\n${background ? `${background}\n\n` : ''}First produce the plan only; the team implements after it.`,
       parent, signal, images, 1, continuation ? 'continuation' : 'task')
     if (signal.aborted) return
@@ -547,7 +547,7 @@ export class Teams {
       if (tester.state === 'failed' || reviewer.state === 'failed') { outcome = 'not_achieved'; break }
       if (testerVerdict === 'pass' && reviewerVerdict === 'pass') { outcome = 'achieved'; break }
       if (testerVerdict !== 'fail' && reviewerVerdict !== 'fail') { outcome = 'unverified'; break }
-      if (round >= MAX_ROUNDS) { outcome = 'not_achieved'; break }
+      if (round >= maxRounds) { outcome = 'not_achieved'; break }
       history = clip(`${history}\n\n## Round ${round}\n${verification}`)
       round += 1
     }

@@ -77,10 +77,11 @@ export function ExecutionSettings() {
   const { blocks, environment, sources } = useSettings().settings
   // Keep raw user text (such as separators between blocked commands) in the draft and parse only on save.
   const executor = blocks.executor.value
-  const saved = { ...executor, maxWorkers: String(executor.maxWorkers), blockedCommands: executor.blockedCommands.join(' '),
-    defaultProfile: executor.defaultProfile ?? '' }
+  const saved = { ...executor, maxWorkers: String(executor.maxWorkers), maxRounds: String(executor.maxRounds),
+    blockedCommands: executor.blockedCommands.join(' '), defaultProfile: executor.defaultProfile ?? '' }
   const draft = useBlockDraft('executor', saved, blocks.executor.revision,
-    value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), blockedCommands: value.blockedCommands.split(/[\s,]+/).filter(Boolean),
+    value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), maxRounds: numberOf(value.maxRounds),
+      blockedCommands: value.blockedCommands.split(/[\s,]+/).filter(Boolean),
       ...(value.defaultProfile.trim() ? { defaultProfile: value.defaultProfile.trim() } : { defaultProfile: undefined }) }))
   const value = draft.value
   const [profileText, setProfileText] = useState(JSON.stringify(executor.profiles, null, 2))
@@ -119,6 +120,10 @@ export function ExecutionSettings() {
           <Field label={t('maxWorkers')} hint={t('maxWorkersHint')}>
             <Input type="number" min={LIMITS.maxWorkers.min} max={LIMITS.maxWorkers.max} required value={value.maxWorkers}
               onChange={event => edit({ maxWorkers: event.target.value })} />
+          </Field>
+          <Field label={t('teamMaxRounds')} hint={t('teamMaxRoundsHint')}>
+            <Input type="number" min={LIMITS.maxRounds.min} max={LIMITS.maxRounds.max} required value={value.maxRounds}
+              onChange={event => edit({ maxRounds: event.target.value })} />
           </Field>
         </div>
         <div className="dt-form dt-block">

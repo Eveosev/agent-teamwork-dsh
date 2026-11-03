@@ -108,6 +108,7 @@ export const ExecutorConfigSchema = z.object({
   profiles: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/, 'Use lowercase kebab-case profile ids'), WorkerProfileSchema).default({}),
   defaultProfile: z.string().trim().min(1).optional(),
   maxWorkers: z.number().int().min(LIMITS.maxWorkers.min).max(LIMITS.maxWorkers.max).default(3),
+  maxRounds: z.number().int().min(LIMITS.maxRounds.min).max(LIMITS.maxRounds.max).default(3),
   directory: z.string().trim().refine(path => path === '' || path.startsWith('/'), 'An absolute path, or empty for <stateDir>/work').default(''),
   teamDirectory: z.string().trim().refine(path => path === '' || path.startsWith('/'), 'An absolute path, or empty for <stateDir>/team').default(''),
   prepare: z.string().max(LIMITS.prepareCommand).default(''),

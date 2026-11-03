@@ -171,6 +171,16 @@ describe('Teams', () => {
     expect(runs).toHaveLength(15)
   })
 
+  it('stops at the configured max rounds instead of the default', async () => {
+    const custom = SettingsSchema.parse({ ...settings(), executor: { ...settings().executor, maxRounds: 2 } })
+    const { teams, runs } = bench({ alwaysFail: true, custom })
+    const team = teams.create('Configured limit', parent)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    expect(teams.get(team.id)?.outcome).toBe('not_achieved')
+    expect(teams.get(team.id)?.rounds).toBe(2)
+    expect(runs).toHaveLength(11)
+  })
+
   it('does not fail a role when session usage cannot be read', async () => {
     const { teams } = bench({ badSessions: true })
     const team = teams.create('Finish without usage fallback', parent)

@@ -41,7 +41,7 @@ The panel's Team form and `POST /teams` still accept text only; image input is c
 | `reviewer` | Reviews the implementation, captures screenshot evidence for visually verifiable product/feature design, and ends with a PASS/FAIL verdict; read-only | `deepseek-v4.1-flash-mb` |
 | `ops` | Inspects CI and deployment state; read-only | `glm-5.3-mb` |
 
-The runtime runs: lead plan → researcher and developer in parallel → tester and reviewer in parallel → ops → lead synthesis. If both verifiers return `VERDICT: PASS`, the team finishes in one round. If either returns `VERDICT: FAIL`, the lead writes concrete repair instructions, the developer applies them, and the tester and reviewer run again. This repeats for at most three rounds (one implementation plus two repairs); a team that still fails is marked `not_achieved`, so a person sees the unresolved result without having to drive each retry.
+The runtime runs: lead plan → researcher and developer in parallel → tester and reviewer in parallel → ops → lead synthesis. If both verifiers return `VERDICT: PASS`, the team finishes in one round. If either returns `VERDICT: FAIL`, the lead writes concrete repair instructions, the developer applies them, and the tester and reviewer run again. This repeats for at most `executor.maxRounds` rounds (default 3: one implementation plus two repairs); a team that still fails is marked `not_achieved`, so a person sees the unresolved result without having to drive each retry. Set the limit to 1–10 under **Execution settings → Max Team Rounds**; it is read when a run starts.
 
 When the deliverable is a product or feature design that can be verified visually, the reviewer must capture a real screenshot of the implemented result and cite its path in the review. A code-only review is not visual acceptance; if a screenshot cannot be captured, the reviewer says why and marks that check unverified.
 
@@ -112,5 +112,5 @@ The team uses DSH providers configured on the profile, not a separate gateway cl
 - No automatic PR or Ticket: the team runs in its own Team working directory (`--dir` or Execution settings), not a per-team worktree. Use the Ticket path when you need worktree isolation, CI checks, review gates and Feishu/GitHub replies.
 - The worker preset gives every child the normal work tools. Role tool allowlists are enforced on Executor Sessions, not on team subagents; the team relies on role instructions plus the sandbox and the account. Do not give the team a more privileged account than the work needs.
 - A team is not persisted as a resumable graph. Restart recovery is deliberately conservative.
-- Automatic repair is limited to three rounds; it does not wait for a person and does not merge or publish anything.
+- Automatic repair is limited to `executor.maxRounds` (default 3); it does not wait for a person and does not merge or publish anything.
 - Feishu and GitHub can trigger Tickets today; starting a team from an external trigger needs a bridge (for example a command handler or a future `team:` route), not part of v0.1.
