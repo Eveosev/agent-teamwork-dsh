@@ -15,7 +15,6 @@ type MemberState = TeamMember['state']
 type TeamRole = TeamMember['role']
 
 const TEAM_ROLES = ['lead', 'researcher', 'developer', 'tester', 'reviewer', 'ops'] as const satisfies readonly TeamRole[]
-const OUTPUT_PREVIEW = 1200
 
 const stateDot = (state: MemberState): DotState => state === 'running' ? 'ongoing' : state === 'done' ? 'done'
   : state === 'failed' ? 'error' : 'idle'
@@ -45,23 +44,30 @@ function durationText(t: T, from: string, to: string | undefined): string {
   return t('teamSeconds', { count: total })
 }
 
-/** Cut a long member output at a line boundary and close an open fence, so a preview does not end mid-code-block. */
-function previewText(text: string): string {
-  const slice = text.slice(0, OUTPUT_PREVIEW)
-  const cut = slice.lastIndexOf('\n')
-  const body = cut > OUTPUT_PREVIEW * 0.6 ? slice.slice(0, cut) : slice
-  const fences = body.match(/^\s*```/gm)?.length ?? 0
-  return `${body}${fences % 2 ? '\n```' : ''}…`
-}
-
-function MemberOutput({ text }: { text: string }) {
+/** A collapsed reading card for long Markdown; the full text opens in a dialog. */
+function ReadingCard({ text, title, action, kind }: {
+  text: string; title: string; action: string; kind: 'summary' | 'output'
+}) {
   const { t } = usePanel()
   const [open, setOpen] = useState(false)
-  const long = text.length > OUTPUT_PREVIEW
+  const long = text.length > 600
   return <>
-    <div className="dt-md-output"><MarkdownLite text={long && !open ? previewText(text) : text} /></div>
-    {long && <button type="button" className="dt-textlink dt-more" aria-expanded={open}
-      onClick={() => setOpen(!open)}>{open ? t('collapse') : t('expand')}</button>}
+    <div className="dt-reading-card" data-kind={kind} role="button" tabIndex={0} aria-haspopup="dialog" aria-label={action}
+      onClick={() => setOpen(true)}
+      onKeyDown={event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        setOpen(true)
+      }}>
+      <div className={long ? 'dt-reading-preview dt-reading-preview-fade' : 'dt-reading-preview'}>
+        <MarkdownLite text={text} links={false} />
+      </div>
+      <span className="dt-reading-more">{action}<Icon name="chevron-right" size={12} /></span>
+    </div>
+    <Modal open={open} onClose={() => setOpen(false)} title={title} closeLabel={t('close')}
+      className="dt-reading-modal">
+      <div className="dt-reading-body"><MarkdownLite text={text} /></div>
+    </Modal>
   </>
 }
 
@@ -92,7 +98,8 @@ function MemberCard({ team, role }: { team: Team; role: TeamRole }) {
     </p>}
     {member?.output && <div className="dt-part">
       <div className="dt-field-head">{t('teamOutput')}</div>
-      <MemberOutput text={member.output} />
+      <ReadingCard kind="output" text={member.output} title={`${roleLabel(t, role)}${t('labelSeparator')}${t('teamOutput')}`}
+        action={t('teamOutputRead')} />
     </div>}
   </div>
 }
@@ -182,26 +189,7 @@ export function TeamStatus() {
 /** A collapsed, clickable reading card for the final summary; the full Markdown opens in a dialog. */
 function TeamSummaryCard({ text }: { text: string }) {
   const { t } = usePanel()
-  const [open, setOpen] = useState(false)
-  const long = text.length > 600
-  return <>
-    <div className="dt-summary-card" role="button" tabIndex={0} aria-haspopup="dialog" aria-label={t('teamSummaryRead')}
-      onClick={() => setOpen(true)}
-      onKeyDown={event => {
-        if (event.key !== 'Enter' && event.key !== ' ') return
-        event.preventDefault()
-        setOpen(true)
-      }}>
-      <div className={long ? 'dt-summary-preview dt-summary-preview-fade' : 'dt-summary-preview'}>
-        <MarkdownLite text={text} links={false} />
-      </div>
-      <span className="dt-summary-more">{t('teamSummaryRead')}<Icon name="chevron-right" size={12} /></span>
-    </div>
-    <Modal open={open} onClose={() => setOpen(false)} title={t('teamSummary')} closeLabel={t('close')}
-      className="dt-summary-modal">
-      <div className="dt-summary-body"><MarkdownLite text={text} /></div>
-    </Modal>
-  </>
+  return <ReadingCard kind="summary" text={text} title={t('teamSummary')} action={t('teamSummaryRead')} />
 }
 
 /** Team detail: state and duration, the task, six role cards, and the lead's final summary. */

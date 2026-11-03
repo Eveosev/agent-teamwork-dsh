@@ -428,6 +428,7 @@ const TEXT = {
   teamElapsed: ['耗时', 'Elapsed'],
   teamError: ['错误', 'Error'],
   teamOutput: ['输出', 'Output'],
+  teamOutputRead: ['阅读完整输出', 'Read full output'],
   teamSummary: ['最终总结', 'Final summary'],
   teamSummaryRead: ['阅读全文', 'Read full summary'],
   teamNotFound: ['找不到这个团队。', 'Team not found.'],

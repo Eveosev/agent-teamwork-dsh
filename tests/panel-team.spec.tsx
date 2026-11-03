@@ -22,16 +22,17 @@ it('lists teams with their state, progress and member dots, and opens the six ro
   expect(text()).toContain('配置：researcher')
   expect(text()).toContain('配置：默认')
   expect(text()).toContain('Tests failed: 1 failure')
-  // Member output is rendered as Markdown, not a raw transcript.
+  // Member output is rendered as a collapsed reading card with the same dialog as the summary.
   expect(all('.dt-card .dt-md-table th').map(cell => cell.textContent)).toEqual(['Step', 'State'])
-  // A long lead output is truncated behind Show all, and the session opens in the host panel.
-  expect(text()).not.toContain('END-OF-LEAD-OUTPUT')
+  const output = document.querySelector<HTMLElement>('.dt-card .dt-reading-card[data-kind="output"]')!
+  expect(output.textContent).toContain(zh.teamOutputRead)
+  expect(output.querySelector('.dt-reading-preview')).not.toBeNull()
+  await click(output)
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('END-OF-LEAD-OUTPUT')
+  await click(find(zh.close))
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
   await click(find(zh.openSession))
   expect(server.opened).toContain('team-lead')
-  await click(zh.expand)
-  expect(text()).toContain('END-OF-LEAD-OUTPUT')
-  await click(zh.collapse)
-  expect(text()).not.toContain('END-OF-LEAD-OUTPUT')
 })
 
 it('starts a team from the form and opens the new team', async () => {
@@ -82,10 +83,10 @@ it('shows the final summary of a finished team without a stop action', async () 
 it('opens the collapsed final summary in a Markdown reading dialog', async () => {
   at({ page: 'team', id: 'team-2' })
   await mount()
-  const card = document.querySelector<HTMLElement>('.dt-summary-card')!
+  const card = document.querySelector<HTMLElement>('.dt-reading-card[data-kind="summary"]')!
   expect(card.getAttribute('aria-haspopup')).toBe('dialog')
   expect(card.textContent).toContain(zh.teamSummaryRead)
-  expect(document.querySelector('.dt-summary-preview .dt-md-table')).not.toBeNull()
+  expect(document.querySelector('.dt-reading-preview .dt-md-table')).not.toBeNull()
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   await click(card)
   const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
@@ -98,7 +99,7 @@ it('opens the collapsed final summary in a Markdown reading dialog', async () =>
 it('opens the summary from the teams list without leaving the list', async () => {
   await mount()
   await click(tab(zh['tab.team']))
-  const card = document.querySelector<HTMLElement>('.dt-list .dt-summary-card')!
+  const card = document.querySelector<HTMLElement>('.dt-list .dt-reading-card[data-kind="summary"]')!
   expect(card).not.toBeNull()
   await click(card)
   expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe(zh.teamSummary)
