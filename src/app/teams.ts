@@ -36,7 +36,8 @@ export interface TeamMember { role: TeamRole; profile: string | null; state: Mem
 /** A durable team record, listed and inspected by the panel. */
 export interface Team { id: string; title: string; task: string; state: TeamState; created_at: string; updated_at: string
   parent_session_id: string; directory: string; members: TeamMember[]; summary?: string; error?: string; outcome?: TeamOutcome
-  rounds?: number; usage?: TeamUsage; continued_from?: string; continued_from_title?: string; continuation?: string }
+  rounds?: number; usage?: TeamUsage; continued_from?: string; continued_from_title?: string; continuation?: string
+  continuation_recipients?: TeamRole[] }
 export interface TeamSummary { id: string; title: string; state: TeamState; created_at: string; updated_at: string
   members: { role: TeamRole; state: MemberState }[]; summary?: string; outcome?: TeamOutcome; rounds?: number; usage?: TeamUsage
   continued_from?: string; continued_from_title?: string }
@@ -170,7 +171,8 @@ export class Teams {
     const team: Team = { id, title: (title.trim() || task.trim().split('\n')[0]!.slice(0, 80)) || 'Agent team', task, state: 'running',
       created_at: at, updated_at: at, parent_session_id: agent.id, directory, members: TEAM_ROLES.map(role => ({ role,
         profile: profiles[role] ? role : settings.executor.defaultProfile ?? null, state: 'idle' })),
-      ...continuation ? { continued_from: continuation.source.id, continued_from_title: continuation.source.title } : {},
+      ...continuation ? { continued_from: continuation.source.id, continued_from_title: continuation.source.title,
+        continuation_recipients: [...TEAM_ROLES] } : {},
       ...continuation?.instruction ? { continuation: continuation.instruction } : {} }
     this.save(team, true)
     const controller = new AbortController()
@@ -347,10 +349,17 @@ export class Teams {
     ].join('\n\n')
   }
 
+  /** A short continuation note sent to every role, so each knows why the working directory already has changes. */
+  private continuationNote(continuation: Continuation): string {
+    return `${continuation.instruction ? `The user's continuation request: ${continuation.instruction}` : 'This run continues earlier work.'}\n` +
+      'Continue from the existing state; inspect the working directory and do not start over.'
+  }
+
   private async execute(team: Team, parent: Agent, signal: AbortSignal, images: readonly ImageBlock[] = [],
     continuation?: Continuation): Promise<void> {
     const task = team.task
     const background = continuation ? this.continuationContext(continuation) : ''
+    const notice = continuation ? this.continuationNote(continuation) : ''
     const plan = await this.run(team, 'lead', `${task}\n\n${background ? `${background}\n\n` : ''}First produce the plan only; the team implements after it.`,
       parent, signal, images)
     if (signal.aborted) return
@@ -362,24 +371,28 @@ export class Teams {
       team.rounds = round; this.save(team)
       if (round === 1) {
         await Promise.all([
-          this.run(team, 'researcher', `${task}\n\nPlan:\n${plan}\n\nGather the repository and external context the implementer needs.`, parent, signal, images, round),
+          this.run(team, 'researcher', `${task}\n\nPlan:\n${plan}\n\n${notice ? `${notice}\n\n` : ''}Gather the repository and external context the implementer needs.`,
+            parent, signal, images, round),
           this.run(team, 'developer', `${task}\n\nPlan:\n${plan}\n\n${background ? `${background}\n\n` : ''}Implement the task now.`,
             parent, signal, images, round),
         ])
       } else {
         const previous = this.contextOf(team, ['researcher', 'developer'])
         const repair = await this.run(team, 'lead', `${task}\n\nPlan:\n${plan}\n\nRound ${round - 1} did not pass verification:\n${verification}\n\n` +
-          'Write concise repair instructions for the developer: the concrete changes, acceptance criteria and checks to rerun. Do not edit files.', parent, signal, images, round)
+          `${notice ? `${notice}\n\n` : ''}Write concise repair instructions for the developer: the concrete changes, acceptance criteria and checks to rerun. Do not edit files.`,
+        parent, signal, images, round)
         if (signal.aborted) return
         await this.run(team, 'developer', `${task}\n\nPlan:\n${plan}\n\nCurrent implementation evidence:\n${previous}\n\n` +
-          `Verification failure:\n${verification}\n\nLead repair instructions:\n${repair}\n\nApply the repair now.`, parent, signal, images, round)
+          `Verification failure:\n${verification}\n\nLead repair instructions:\n${repair}\n\n${notice ? `${notice}\n\n` : ''}Apply the repair now.`,
+        parent, signal, images, round)
       }
       if (signal.aborted) return
       const work = this.contextOf(team, ['researcher', 'developer'])
       const prior = history ? `\n\nEarlier verification:\n${history}` : ''
       await Promise.all([
-        this.run(team, 'tester', `${task}\n\nPlan:\n${plan}\n\n${work}${prior}\n\nTest the implementation and report the commands and results.`, parent, signal, images, round),
-        this.run(team, 'reviewer', `${task}\n\nPlan:\n${plan}\n\n${work}${prior}\n\nReview the implementation and report findings; do not edit. ` +
+        this.run(team, 'tester', `${task}\n\nPlan:\n${plan}\n\n${work}${prior}${notice ? `\n\n${notice}` : ''}\n\nTest the implementation and report the commands and results.`,
+          parent, signal, images, round),
+        this.run(team, 'reviewer', `${task}\n\nPlan:\n${plan}\n\n${work}${prior}${notice ? `\n\n${notice}` : ''}\n\nReview the implementation and report findings; do not edit. ` +
           'If the task is a product or feature design that can be verified visually, include a real screenshot and its path as evidence.', parent, signal, images, round),
       ])
       if (signal.aborted) return
@@ -397,13 +410,14 @@ export class Teams {
     if (signal.aborted) return
     team.rounds = round; this.save(team)
     const finalWork = this.contextOf(team, ['researcher', 'developer'])
-    await this.run(team, 'ops', `${task}\n\n${finalWork}\n\nVerification:\n${verification}\n\nInspect CI and repository status; do not edit.`, parent, signal, images, round)
+    await this.run(team, 'ops', `${task}\n\n${finalWork}\n\nVerification:\n${verification}\n\n${notice ? `${notice}\n\n` : ''}Inspect CI and repository status; do not edit.`,
+      parent, signal, images, round)
     if (signal.aborted) return
     const evidence = this.contextOf(team, TEAM_ROLES)
     const synthesis = await this.run(team, 'lead', `${task}\n\nPlan:\n${plan}\n\nAll team evidence:\n${evidence}\n\n` +
-      `Final verification outcome: ${outcomeText(outcome)} after round ${round}. Synthesize the final result: what changed, what was verified, ` +
-      'what failed, and what a human should do next. Do not claim success when the outcome is NOT ACHIEVED or UNVERIFIED. This is the team summary.',
-    parent, signal, images, round)
+      `${notice ? `${notice}\n\n` : ''}Final verification outcome: ${outcomeText(outcome)} after round ${round}. Synthesize the final result: what changed, ` +
+      'what was verified, what failed, and what a human should do next. Do not claim success when the outcome is NOT ACHIEVED or UNVERIFIED. ' +
+      'This is the team summary.', parent, signal, images, round)
     team.summary = clip(synthesis)
     team.outcome = outcome
     team.state = 'done'

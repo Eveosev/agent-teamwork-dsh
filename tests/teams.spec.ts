@@ -85,12 +85,13 @@ describe('Teams', () => {
     expect(source).toMatchObject({ state: 'done', outcome: 'achieved', summary: before.summary })
     expect(stored).toMatchObject({ task: first.task, title: first.title, directory: first.directory,
       continued_from: first.id, continued_from_title: first.title, continuation: 'Fix the remaining tab grouping issue',
-      outcome: 'achieved' })
+      continuation_recipients: [...TEAM_ROLES], outcome: 'achieved' })
     expect(teams.list()[0]?.id).toBe(next.id)
     expect(runs).toHaveLength(14)
     expect(runs[7]!.prompt).toContain('Previous attempt evidence:')
     expect(runs[7]!.prompt).toContain('Fix the remaining tab grouping issue')
     expect(runs[9]!.prompt).toContain('instead of starting over')
+    for (const run of runs.slice(7)) expect(run.prompt).toContain('Fix the remaining tab grouping issue')
   })
 
   it('refuses to continue a running team or an unknown team', async () => {

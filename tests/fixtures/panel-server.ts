@@ -104,6 +104,8 @@ export interface PanelServer {
   health: Record<string, Health>
   /** When true, all API requests return an empty 404 to simulate the host plugin being stopped. */
   down: boolean
+  /** When true, the host predates the continuation route and answers it with Unknown operation. */
+  legacyContinue: boolean
   /** Count of responses not yet consumed by the client. */
   pending: number
   form?: ConfigForm<Record<string, unknown>> | undefined
@@ -286,7 +288,7 @@ function initial(): PanelServer {
     en: 'Feishu message' } }
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
   return {
-    health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
+    health: {}, down: false, legacyContinue: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
         name: 'Widgets Bot' } } },
@@ -377,6 +379,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     return { team }
   } },
   'POST teams/:id/continue': { body: true, answer: ({ params, body }) => {
+    if (server.legacyContinue) return refuse(404, 'Unknown operation')
     const source = server.teams.details[params.id]
     if (!source) return refuse(404, `No team ${params.id}`)
     if (source.state === 'running') return refuse(400, 'Team is still running; wait for it to finish before continuing')
@@ -384,7 +387,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     const team: Team = { id: `team-${server.teams.items.length + 1}`, title: source.title, task: source.task, state: 'running',
       created_at: at, updated_at: at, parent_session_id: source.parent_session_id, directory: source.directory,
       members: TEAM_ROLE_NAMES.map(role => teamMember(role, 'idle')), continued_from: source.id, continued_from_title: source.title,
-      ...body.instruction?.trim() ? { continuation: body.instruction.trim() } : {} }
+      continuation_recipients: [...TEAM_ROLE_NAMES], ...body.instruction?.trim() ? { continuation: body.instruction.trim() } : {} }
     server.teams.items = [teamSummary(team), ...server.teams.items]
     server.teams.details[team.id] = team
     return { team }

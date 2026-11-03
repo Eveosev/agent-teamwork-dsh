@@ -41,6 +41,16 @@ function OutcomeTag({ state, outcome }: { state: TeamState; outcome?: TeamOutcom
 }
 const doneCount = (members: readonly { state: MemberState }[]): number => members.filter(member => member.state === 'done').length
 const tokenCount = (value: number): string => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+/** A fallback task for a host that predates POST teams/:id/continue; it carries the source evidence in the task itself. */
+const legacyContinuationTask = (source: Team, instruction: string): string => {
+  const evidence = source.summary ?? source.members.flatMap(member => member.output ? `## ${member.role}\n${member.output}` : []).join('\n\n')
+  const text = `Continuation of team ${source.id}.\n\nOriginal task:\n${source.task}\n\n` +
+    `Continuation request:\n${instruction || 'Finish the original task.'}\n\nPrevious evidence:\n${evidence || '(no summary)'}\n\n` +
+    'This request is sent to all six roles: lead, researcher, developer, tester, reviewer, ops.'
+  return text.length > 7900 ? `${text.slice(0, 7900)}\n… [truncated]` : text
+}
+const isUnknownOperation = (failure: unknown): failure is ApiError =>
+  failure instanceof ApiError && failure.status === 404 && /Unknown operation/i.test(failure.message)
 
 /** One role's or one team's input/output/cached token totals. */
 function TokenUsageLine({ usage }: { usage: TeamUsage }) {
@@ -169,14 +179,25 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
 }
 
 /** Start a linked run from a finished team; the source record stays intact. */
-function ContinueTeamButton({ team }: { team: { id: string; title: string } }) {
-  const { t, call, navigate } = usePanel()
+function ContinueTeamButton({ team, source }: { team: { id: string; title: string }; source?: Team }) {
+  const { t, call, navigate, notify } = usePanel()
   const [open, setOpen] = useState(false)
   const [instruction, setInstruction] = useState('')
   const start = useAction(async () => {
-    const body = instruction.trim() ? { instruction: instruction.trim() } : {}
-    const { team: started } = await call('POST teams/:id/continue', { id: team.id, body })
+    const text = instruction.trim()
+    const body = text ? { instruction: text } : {}
+    let started: Team
+    try {
+      started = (await call('POST teams/:id/continue', { id: team.id, body })).team
+    } catch (failure) {
+      if (!isUnknownOperation(failure)) throw failure
+      // Keep an already running older host usable: carry the source evidence inside a normal new team task.
+      const previous = source ?? await call('GET teams/:id', { id: team.id })
+      started = (await call('POST teams', { body: { task: legacyContinuationTask(previous, text),
+        title: `${previous.title} · ${t('teamContinued')}`.slice(0, 120), directory: previous.directory } })).team
+    }
     setOpen(false); setInstruction('')
+    notify(t('teamContinueSent', { count: started.continuation_recipients?.length ?? TEAM_ROLES.length }))
     navigate({ page: 'team', id: started.id })
   })
   const fieldId = `dt-team-continue-${team.id}`
@@ -288,13 +309,19 @@ export function TeamPage({ id }: { id: string }) {
       {running ? <ConfirmButton variant="outline" icon="stop" label={t('stop')} title={t('teamStopTitle')}
         message={t('teamStopConfirm', { title: data.title })}
         onConfirm={async () => { await call('POST teams/:id/stop', { id }); await reload() }} />
-        : <ContinueTeamButton team={data} />}
+        : <ContinueTeamButton team={data} source={data} />}
     </div>
     {data.error && <p className="dt-banner dt-danger dt-mono">
       <span className="dt-banner-label">{t('teamError')}{t('labelSeparator')}</span>{data.error}
     </p>}
     <Section title={t('teamTask')}><div className="dt-event-text">{data.task}</div></Section>
     {data.continuation && <Section title={t('teamContinuation')}><div className="dt-event-text">{data.continuation}</div></Section>}
+    {data.continuation_recipients && <Section title={t('teamContinuationTargets')} count={data.continuation_recipients.length}>
+      <div className="dt-hint">{t('teamContinuationTargetsHint')}</div>
+      <div className="dt-tag-group">{data.continuation_recipients.map(role =>
+        <Tag key={role} tone="neutral">{roleLabel(t, role)}</Tag>)}</div>
+      {!data.continuation && <div className="dt-hint">{t('teamContinuationNone')}</div>}
+    </Section>}
     <Section title={t('teamMembers')} count={TEAM_ROLES.length}>
       <div className="dt-grid3">{TEAM_ROLES.map(role => <MemberCard key={role} team={data} role={role} />)}</div>
     </Section>

@@ -64,7 +64,25 @@ it('continues a finished team from its page with an optional instruction', async
   expect(text()).toContain(zh.teamContinuedFrom)
   expect(text()).toContain(zh.teamContinuation)
   expect(text()).toContain('Fix the remaining check')
+  expect(text()).toContain(zh.teamContinuationTargets)
+  expect(text()).toContain(zh['teamRole.lead'])
   expect(all('.dt-grid3 .dt-card').length).toBe(6)
+})
+
+it('falls back to a plain team when the host predates the continuation route', async () => {
+  server.legacyContinue = true
+  at({ page: 'team', id: 'team-2' })
+  await mount()
+  await click(zh.teamContinue)
+  await type(field<HTMLTextAreaElement>(zh.teamContinuation), 'Fix the remaining check')
+  await click(zh.teamContinueStart)
+  const created = server.requests.filter(request => request.path === 'teams' && request.method === 'POST').at(-1)
+  expect(created?.body).toMatchObject({ title: `发布检查 · ${zh.teamContinued}`, directory: '/tmp/team' })
+  expect((created?.body as { task: string }).task).toContain('Continuation of team team-2')
+  expect((created?.body as { task: string }).task).toContain('Fix the remaining check')
+  expect((created?.body as { task: string }).task).toContain('all six roles')
+  expect(document.querySelector('.dt-page-title h2')?.textContent).toBe(`发布检查 · ${zh.teamContinued}`)
+  expect(text()).toContain('Continuation of team team-2')
 })
 
 it('stops a running team from the list after confirmation', async () => {
