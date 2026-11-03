@@ -142,6 +142,13 @@ div.dt-preview-head { color: var(--dsw-alias-label-secondary); }
 .dt-md p, .dt-md ul, .dt-md ol { margin: 0; }
 .dt-md ul, .dt-md ol { padding-left: 20px; display: flex; flex-direction: column; gap: 2px; }
 .dt-md-heading { font-weight: 500; }
+.dt-md-table-wrap { overflow-x: auto; }
+.dt-md-table { border-collapse: collapse; min-width: 100%; font-size: 12px; line-height: 18px; }
+.dt-md-table th, .dt-md-table td { padding: 4px 8px; border: 0.5px solid var(--dsw-alias-border-l3); vertical-align: top; }
+.dt-md-table th { font-weight: 500; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-2); }
+.dt-md-code { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); overflow-x: auto; font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; line-height: 18px; white-space: pre; }
+.dt-md-rule { width: 100%; margin: 4px 0; border: 0; border-top: 0.5px solid var(--dsw-alias-border-l3); }
+.dt-md-local { border-bottom: 1px dotted var(--dsw-alias-border-l4); cursor: help; }
 .dt-code { font-family: var(--ds-font-family-code, Menlo, monospace); font-size: 12px; padding: 0 4px; border-radius: 4px; background: var(--dsw-alias-bg-module-platform); }
 .dt-dot-wrap { display: inline-flex; flex: none; }
 .dt-search-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

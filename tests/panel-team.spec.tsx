@@ -72,6 +72,8 @@ it('shows the final summary of a finished team without a stop action', async () 
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('发布检查')
   expect(text()).toContain(zh.teamSummary)
   expect(text()).toContain('No action')
+  expect(document.querySelector('.dt-md-table th')?.textContent).toBe('Check')
+  expect(all('.dt-md-table td').map(cell => cell.textContent)).toEqual(['tests', '✅', 'build', '✅'])
   expect(all('button').some(button => button.textContent === zh.stop)).toBe(false)
 })
 

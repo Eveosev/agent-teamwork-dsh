@@ -46,12 +46,21 @@ function Inlines({ parts }: { parts: Inline[] }) {
   return <>{parts.map((part, index) => part.kind === 'bold' ? <strong key={index}>{part.text}</strong>
     : part.kind === 'code' ? <code key={index} className="dt-code">{part.text}</code>
     : part.kind === 'link' ? <a key={index} className="dt-inline-link" href={part.url} title={part.url} {...external}>{part.text}</a>
+    : part.kind === 'local' ? <span key={index} className="dt-md-local" title={part.path}>{part.text}</span>
     : <Fragment key={index}>{part.text}</Fragment>)}</>
 }
-/** Renders a safe Markdown subset (headings, lists, paragraphs, bold, inline code, links) without interpreting raw HTML. */
+/** Renders a safe Markdown subset (headings, lists, paragraphs, tables, code blocks, rules, bold, inline code, links) without raw HTML. */
 export function MarkdownLite({ text }: { text: string }) {
   const { t } = usePanel()
   return <div className="dt-md">{markdownBlocks(readableMarkers(t, text)).map((block, index) => {
+    if (block.kind === 'rule') return <hr key={index} className="dt-md-rule" />
+    if (block.kind === 'code') return <pre key={index} className="dt-md-code"><code>{block.text}</code></pre>
+    if (block.kind === 'table') return <div key={index} className="dt-md-table-wrap"><table className="dt-md-table">
+      <thead><tr>{block.headers.map((header, at) => <th key={at} style={{ textAlign: block.align[at] }}><Inlines
+        parts={inlines(header)} /></th>)}</tr></thead>
+      <tbody>{block.rows.map((row, at) => <tr key={at}>{row.map((cell, column) => <td key={column}
+        style={{ textAlign: block.align[column] }}><Inlines parts={inlines(cell)} /></td>)}</tr>)}</tbody>
+    </table></div>
     if (block.kind !== 'list') return <p key={index} className={block.kind === 'heading' ? 'dt-md-heading' : undefined}><Inlines
       parts={inlines(block.text)} /></p>
     const items = block.items.map((item, at) => <li key={at}><Inlines parts={inlines(item)} /></li>)

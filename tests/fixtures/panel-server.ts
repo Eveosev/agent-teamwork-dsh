@@ -257,7 +257,9 @@ function teamFixtures(): PanelServer['teams'] {
   }
   const done: Team = {
     id: 'team-2', title: '发布检查', task: '检查发布状态。', state: 'done', created_at: at(1_800_000), updated_at: at(1_200_000),
-    parent_session_id: 'master', directory: '/tmp/team', summary: 'All checks passed. **No action** is needed.', members: TEAM_ROLE_NAMES.map(role =>
+    parent_session_id: 'master', directory: '/tmp/team',
+    summary: 'All checks passed. **No action** is needed.\n\n| Check | Result |\n|:---|---:|\n| tests | ✅ |\n| build | ✅ |',
+    members: TEAM_ROLE_NAMES.map(role =>
       teamMember(role, 'done', { started_at: at(1_800_000), ended_at: at(1_200_000) })),
   }
   return { items: [teamSummary(running), teamSummary(done)], details: { [running.id]: running, [done.id]: done } }

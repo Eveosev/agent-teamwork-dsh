@@ -17,6 +17,18 @@ it('reads bold, inline code and links, and shows a bare address by its host and 
   expect(linkify('<b>**not bold**</b>')).toEqual([{ kind: 'text', text: '<b>**not bold**</b>' }])
 })
 
+it('reads a pipe table with alignment, a fenced code block and a horizontal rule', () => {
+  expect(markdownBlocks('| 交付件 | 状态 |\n|:---|---:|\n| `a` | [x](/tmp/x) |\n')).toEqual([{ kind: 'table',
+    headers: ['交付件', '状态'], align: ['left', 'right'], rows: [['`a`', '[x](/tmp/x)']] }])
+  expect(markdownBlocks('```ts\nconst x = 1\n```\n---\n')).toEqual([
+    { kind: 'code', language: 'ts', text: 'const x = 1' }, { kind: 'rule' }])
+})
+
+it('reads a local path link as a labelled reference rather than a web link', () => {
+  expect(inlines('[file](/tmp/a.md)')).toEqual([{ kind: 'local', text: 'file', path: '/tmp/a.md' }])
+  expect(inlines('[file](file:///tmp/a.md)')).toEqual([{ kind: 'local', text: 'file', path: 'file:///tmp/a.md' }])
+})
+
 it('keeps a link to anything but a web address as text, and leaves the punctuation after a bare address out of it', () => {
   for (const text of ['[x](javascript:alert(1))', '[x](data:text/html,<b>hi</b>)']) {
     expect(inlines(text).every(part => part.kind === 'text')).toBe(true)
