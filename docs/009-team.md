@@ -2,19 +2,20 @@
 
 `/team` starts a six-role team for one task. It is a local-first orchestration mode: the Session that invokes `/team` creates a durable Team record, runs the roles as managed DSH subagents, and the panel shows each role's state, session and evidence. It does not need the GitHub or Feishu setup that Tickets need, so it also works while the Overview still reports a deployment problem.
 
-> **Design note:** the target open-collaboration model — shared Team thread, human ingress, role handoffs and router-controlled dispatch — is described in [011-team-open-collaboration.md](011-team-open-collaboration.md). That document is a design proposal, not current behavior.
-
 ## Use
 
 In any DSH chat (the invoking Session becomes the team's parent):
 
 ```text
 /team Add a health endpoint and a test for it
+/team --open Add a health endpoint and a test for it        (open collaboration; see below)
 /team --dir /Users/me/projects/agent-teamwork Add a health endpoint and a test for it
 /team Fix the layout shown in the attached screenshot   (attach the image in the composer)
 /team status
 /team stop team-<id>
 ```
+
+A Team starts in one of two modes. **Pipeline** keeps the fixed lead → researcher/developer → tester/reviewer → ops → lead sequence. **Open** keeps the same six roles but runs one active turn at a time and lets a role hand work to another role, the router gate each handoff, and a person message a running team. The panel's Team form defaults to **Open**; `POST /teams` defaults to **Pipeline** for compatibility, and `/team` accepts `--open`. The rest of this document describes the pipeline flow first, then the open additions.
 
 The team works in the **Team working directory** from Execution settings, or `--dir <path>` for one run. The default is `<stateDir>/team`; set the setting to the target repository checkout (for example `/Users/me/Vibe/agent-teamwork`) before starting a team that should edit that repository.
 
@@ -69,6 +70,33 @@ A Team record holds the task, title, timestamps, parent Session, each member's p
 - A process restart marks a still-running team `failed`; child subagents are not silently resumed.
 - Outputs are clipped at 24,000 characters per member and summary.
 
+## Open collaboration
+
+Open mode keeps the fixed six-role roster: no role is invented at runtime. Each role still runs in a fresh child Session, but the Team thread is now the source of truth. The run starts with a lead plan, then a worker (normally the developer), the Tester and Reviewer gates, and a final lead synthesis. A role can skip the default next step with an explicit handoff line:
+
+```text
+HANDOFF: researcher | Check the authentication middleware and report the exact files
+HANDOFF: developer | Implement the redirect fix in src/auth.ts
+```
+
+or the compact form `@researcher: Check ...`. The router checks that the target is a known role, rejects self-handoffs, deduplicates an identical handoff from the same turn, and enforces `maxHandoffs` (default 12). Explicit handoffs never bypass the Tester/Reviewer gate for `achieved`: the outcome is still `achieved` only when both verifiers return `VERDICT: PASS` and the lead synthesis completes.
+
+A running Team has a **Team thread** in the detail page. The composer accepts a person message at any time:
+
+- No mention follows the active turn; an `@role` mention targets that role.
+- A redirect ("stop", "instead", "不要用", "改用", ...) interrupts the active turn, aborts its child Session, and starts a new turn with the message. The interrupted turn is recorded as `interrupted`, not failed.
+- Other messages queue for the end of the current turn. An acknowledgement such as "ok" or "收到" is recorded but starts no new work.
+- Messages are persisted in the thread; the panel polls `GET teams/:id/thread` while the team is open. The text limit is 20,000 characters, and a mention must name one of the six roles.
+- After a terminal Team, use **Continue**; the thread and its history are kept.
+
+Open turns have hard bounds: `maxTurns` (default 24) and `maxHandoffs` (default 12). Reaching either bound, or hitting a role failure, parks the Team as **waiting for you** rather than silently starting another turn; a stop is terminal.
+
+### Approvals
+
+A role can end its turn with `APPROVAL_REQUEST: <question>` when it needs a person to choose before a consequential action. The Team then has `waiting_for: "approval"`, and the thread shows **Approve** / **Reject** controls. The approval is a control-plane event, not a seventh worker: only a person resolves it. Approval returns the turn to the requesting role; rejection returns it to the lead with the person's reason. The API is `POST teams/:id/approvals/:eventId` with `{ approved, reason? }`.
+
+Open mode does not yet make child Sessions persistent across turns, run turns concurrently, or enforce a tool-level approval gate. Those remain follow-ups in the design document; the current approval pauses between turns.
+
 The team output is evidence for a person, not an automatic merge: review the summary, the child Sessions and the diff before shipping.
 
 Team outputs keep Markdown image syntax. The panel renders images inline and turns relative or absolute local file links into a file dialog. `GET teams/:id/file?path=...` serves supported images and text only from the team's working directory; paths resolved outside it (including through symlinks) are refused. Images are capped at 8 MB.
@@ -98,9 +126,12 @@ The panel uses the same routes:
 ```text
 GET  /orchestrator/api/teams                 -> { items: TeamSummary[], active: number }
 GET  /orchestrator/api/teams/:id             -> Team
+GET  /orchestrator/api/teams/:id/thread?after=&limit= -> { teamId, events, turns, nextAfter, activity, waitingFor? }
 GET  /orchestrator/api/teams/:id/file?path=  -> { name, mime, data } (base64; only inside the Team directory)
 POST /orchestrator/api/teams/:id/delete      -> { deleted: true } (terminal Team and its continuation lineage; files and Sessions are kept)
-POST /orchestrator/api/teams                 { task, title?, directory? } -> { team }
+POST /orchestrator/api/teams                 { task, title?, directory?, mode?: 'open'|'pipeline' } -> { team }
+POST /orchestrator/api/teams/:id/messages    { content, mentions?, clientId? } -> { event, delivery, target?, reason?, turnId? }
+POST /orchestrator/api/teams/:id/approvals/:eventId { approved, reason? } -> { event, delivery, target?, reason? }
 POST /orchestrator/api/teams/:id/continue    { instruction? } -> { team }
 POST /orchestrator/api/teams/:id/stop        -> { stopped: boolean }
 ```
@@ -113,6 +144,7 @@ The team uses DSH providers configured on the profile, not a separate gateway cl
 
 - No automatic PR or Ticket: the team runs in its own Team working directory (`--dir` or Execution settings), not a per-team worktree. Use the Ticket path when you need worktree isolation, CI checks, review gates and Feishu/GitHub replies.
 - The worker preset gives every child the normal work tools. Role tool allowlists are enforced on Executor Sessions, not on team subagents; the team relies on role instructions plus the sandbox and the account. Do not give the team a more privileged account than the work needs.
-- A team is not persisted as a resumable graph. Restart recovery is deliberately conservative.
-- Automatic repair is limited to `executor.maxRounds` (default 3); it does not wait for a person and does not merge or publish anything.
+- Open mode persists the thread, turns, handoffs and approvals; a child Session is still fresh per turn and is not resumed. Restart recovery marks a running open turn as failed rather than replaying it. Pipeline teams keep their original conservative recovery.
+- Pipeline automatic repair is limited to `executor.maxRounds` (default 3); it does not wait for a person and does not merge or publish anything. Open mode uses `maxTurns` (24) and `maxHandoffs` (12) instead.
+- Open mode serializes turns: one active turn at a time. It does not yet run roles concurrently or enforce a tool-level approval gate.
 - Feishu and GitHub can trigger Tickets today; starting a team from an external trigger needs a bridge (for example a command handler or a future `team:` route), not part of v0.1.

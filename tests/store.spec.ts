@@ -262,3 +262,25 @@ it('reads `%` and `_` in a key prefix and a search query as written, not as patt
   expect([store.read.search('50%').map(item => item.id), store.read.search('a_b').map(item => item.id)]).toEqual([['p'], ['r']])
   store.close()
 })
+
+it('appends Team thread events, deduplicates client retries, and stores turns', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  const input = { teamId: 'team-1', kind: 'message' as const, createdAt: '2026-01-01T00:00:00.000Z',
+    actor: { type: 'human' as const, id: 'local' }, content: 'hello', mentions: [], clientId: 'client-1', metadata: { delivery: 'queued' } }
+  const first = store.appendTeamEvent({ ...input, id: 'event-1' })
+  const retry = store.appendTeamEvent({ ...input, id: 'event-2' })
+  expect(retry.id).toBe(first.id)
+  expect(store.latestTeamEventSeq('team-1')).toBe(1)
+  expect(store.listTeamEvents('team-1')).toEqual([first])
+  expect(store.updateTeamEvent('team-1', first.id, { metadata: { delivery: 'injected' } })?.metadata)
+    .toMatchObject({ delivery: 'injected' })
+  const turn = { id: 'turn-1', teamId: 'team-1', seq: 1, role: 'lead' as const, triggerEventId: first.id,
+    state: 'completed' as const, startedAt: '2026-01-01T00:00:00.000Z', endedAt: '2026-01-01T00:01:00.000Z' }
+  store.saveTeamTurn(turn)
+  expect(store.getTeamTurn('turn-1')).toMatchObject(turn)
+  expect(store.listTeamTurns('team-1')).toEqual([turn])
+  store.deleteTeamThread('team-1')
+  expect(store.listTeamEvents('team-1')).toEqual([])
+  expect(store.listTeamTurns('team-1')).toEqual([])
+  store.close()
+})

@@ -239,9 +239,9 @@ export class Runtime extends Service implements SourceHost {
         handler: (invocation: { agent: Agent; rawInput: string; attachments?: readonly (ImageBlock | FileBlock)[] }) =>
           TeamCommandResult | Promise<TeamCommandResult> }): () => void } | undefined
       if (!commands) return
-      const usage = 'Usage: /team [--dir <path>] <task> (+ optional images), /team status, or /team stop <team-id>'
+      const usage = 'Usage: /team [--open] [--dir <path>] <task> (+ optional images), /team status, or /team stop <team-id>'
       this.disposers.push(commands.register({ name: 'team', description: 'Start a six-role agent team, or manage running teams',
-        input: { hint: '[--dir <path>] <task> (+ optional images) | status | stop <team-id>', attachments: true },
+        input: { hint: '[--open] [--dir <path>] <task> (+ optional images) | status | stop <team-id>', attachments: true },
         handler: ({ agent, rawInput, attachments = [] }) => {
           const input = rawInput.trim()
           const images = attachments.filter((block): block is ImageBlock => block.type === 'image')
@@ -256,13 +256,15 @@ export class Runtime extends Service implements SourceHost {
           if (attachments.some(block => block.type === 'file')) return { kind: 'error',
             text: '/team accepts images as attachments only; remove the file attachment and retry' }
           if (!input && !images.length) return { kind: 'error', text: usage }
-          const directory = /^--dir\s+(\S+)\s+([\s\S]+)$/.exec(input)
+          const open = /^--open(?:\s+|$)/.test(input)
+          const withoutMode = input.replace(/^--open(?:\s+|$)/, '')
+          const directory = /^--dir\s+(\S+)\s+([\s\S]+)$/.exec(withoutMode)
           // The team record keeps text only; an image-only invocation gets a neutral task and title.
-          const task = (directory ? directory[2]!.trim() : input) || 'Work from the attached images.'
-          const title = input ? '' : 'Image task'
+          const task = (directory ? directory[2]!.trim() : withoutMode.trim()) || 'Work from the attached images.'
+          const title = withoutMode.trim() ? '' : 'Image task'
           const start = (): TeamCommandResult => {
             try {
-              const team = this.teams.create(task, agent, title, directory?.[1], images)
+              const team = this.teams.create(task, agent, title, directory?.[1], images, open ? 'open' : 'pipeline')
               const attached = images.length ? ` (${images.length} image${images.length === 1 ? '' : 's'} attached)` : ''
               return { kind: 'success', text: `Team ${team.id} started in ${team.directory}: ${team.title}${attached}` }
             } catch (error) { return { kind: 'error', text: String(error) } }

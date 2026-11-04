@@ -6,6 +6,8 @@ import { key, threadKey, type ChannelRef, type Decision, type OutboundMessage, t
   type ThreadFacts, type Ticket, type Trigger, type TriggerDisposition } from '../core/index.ts'
 import { KV, type Family, type Key } from '../kv.ts'
 import { SettingsSchema, type Settings, type SettingsOrigin, type SettingsSave } from '../policy.ts'
+import type { TeamEvent, TeamTurn } from './team-thread.ts'
+import type { TeamRole } from './teams.ts'
 import { OLDEST_SCHEMA, SCHEMA_VERSION, migrateTo11, tooOld } from './migration.ts'
 import { Versions } from './versions.ts'
 import { storeReads } from './store-read.ts'
@@ -51,9 +53,9 @@ export { SCHEMA_VERSION }
 export class Store implements Repositories {
   readonly db: DatabaseSync
   /**
-   * Opens or creates the SQLite database at `path`, migrating schema 10 to schema 11 in a single transaction.
+   * Opens or creates the SQLite database at `path`, migrating supported older schemas to the current schema in a single transaction.
    * @param report - Receives errors thrown by `afterCommit` callbacks without failing the committed transaction.
-   * @throws When the database schema is older than `OLDEST_SCHEMA` (10), newer than `SCHEMA_VERSION` (11), or when migration fails; in every case the database file is left unchanged and the SQLite handle is closed so a later attempt in the same process can open it.
+   * @throws When the database schema is older than `OLDEST_SCHEMA` (10), newer than `SCHEMA_VERSION` (12), or when migration fails; in every case the database file is left unchanged and the SQLite handle is closed so a later attempt in the same process can open it.
    */
   constructor(path: string, private readonly report: (error: unknown) => void = () => {}) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
@@ -80,13 +82,21 @@ export class Store implements Repositories {
             CREATE TABLE IF NOT EXISTS effect (kind TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, seq INTEGER NOT NULL,
               generation INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', due INTEGER NOT NULL,
               since TEXT NOT NULL, PRIMARY KEY (kind, key));
+            CREATE TABLE IF NOT EXISTS team_event (team_id TEXT NOT NULL, seq INTEGER NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL,
+              actor_type TEXT NOT NULL, actor_role TEXT, actor_id TEXT, actor_name TEXT, content TEXT NOT NULL, mentions TEXT NOT NULL DEFAULT '[]', reply_to TEXT, turn_id TEXT,
+              client_id TEXT, metadata TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, PRIMARY KEY (team_id, seq), UNIQUE (team_id, id));
+            CREATE UNIQUE INDEX IF NOT EXISTS team_event_client ON team_event(team_id, client_id) WHERE client_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS team_event_created ON team_event(team_id, created_at);
+            CREATE TABLE IF NOT EXISTS team_turn (id TEXT PRIMARY KEY, team_id TEXT NOT NULL, seq INTEGER NOT NULL, role TEXT NOT NULL,
+              trigger_event TEXT NOT NULL, state TEXT NOT NULL, session_id TEXT, output_event TEXT, abort_reason TEXT, error TEXT, usage TEXT,
+              started_at TEXT, ended_at TEXT, UNIQUE (team_id, seq));
             CREATE INDEX IF NOT EXISTS trigger_at ON trigger(at);
             CREATE INDEX IF NOT EXISTS trigger_thread_at ON trigger_thread(thread, at);
             CREATE INDEX IF NOT EXISTS decision_thread ON decision(thread);
             CREATE INDEX IF NOT EXISTS effect_due ON effect(kind, due, seq);
           `)
           this.addColumns()
-          if (migrating) migrateTo11(this)
+          if (version !== undefined && version < 11) migrateTo11(this)
           if (version !== SCHEMA_VERSION) this.set(KV.store.schema, SCHEMA_VERSION)
         })
       } catch (error) {
@@ -178,6 +188,97 @@ export class Store implements Repositories {
     const prefix = typeof family === 'string' ? family : family.prefix
     const pattern = `${prefix.replace(/[\\%_]/g, match => `\\${match}`)}%`
     return this.db.prepare("SELECT key FROM kv WHERE key LIKE ? ESCAPE '\\'").all(pattern).map(row => String(row.key))
+  }
+
+  /** Append one Team thread event, assigning its per-team sequence inside a transaction. A repeated `clientId` returns the original event. */
+  appendTeamEvent(input: Omit<TeamEvent, 'seq'>): TeamEvent {
+    return this.atomic(() => {
+      if (input.clientId) {
+        const existing = this.db.prepare('SELECT * FROM team_event WHERE team_id=? AND client_id=?').get(input.teamId, input.clientId)
+        if (existing) return this.teamEventOf(existing)
+      }
+      const seq = Number(this.db.prepare('SELECT IFNULL(MAX(seq), 0) + 1 AS seq FROM team_event WHERE team_id=?').get(input.teamId)?.seq ?? 1)
+      const actor = input.actor
+      this.db.prepare(`INSERT OR IGNORE INTO team_event
+        (team_id, seq, id, kind, actor_type, actor_role, actor_id, actor_name, content, mentions, reply_to, turn_id, client_id, metadata, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.teamId, seq, input.id, input.kind, actor.type,
+        actor.type === 'role' ? actor.role : null, actor.type === 'human' ? actor.id : null,
+        actor.type === 'human' ? actor.displayName ?? null : actor.type === 'role' ? actor.name : null,
+        input.content, JSON.stringify(input.mentions), input.replyTo ?? null, input.turnId ?? null, input.clientId ?? null,
+        JSON.stringify(input.metadata), input.createdAt)
+      const row = this.db.prepare('SELECT * FROM team_event WHERE team_id=? AND id=?').get(input.teamId, input.id)
+      if (!row) throw new Error(`Could not append Team event ${input.id}`)
+      return this.teamEventOf(row)
+    })
+  }
+  /** Team events after `after`, oldest first; at most `limit` (clamped to 200). */
+  listTeamEvents(teamId: string, after = 0, limit = 200): TeamEvent[] {
+    return this.db.prepare('SELECT * FROM team_event WHERE team_id=? AND seq>? ORDER BY seq LIMIT ?')
+      .all(teamId, after, Math.max(1, Math.min(200, limit))).map(row => this.teamEventOf(row))
+  }
+  /** Latest Team event sequence, or 0 for a team with no thread. */
+  latestTeamEventSeq(teamId: string): number {
+    return Number(this.db.prepare('SELECT IFNULL(MAX(seq), 0) AS seq FROM team_event WHERE team_id=?').get(teamId)?.seq ?? 0)
+  }
+  /** Update a message's delivery metadata after an ingress decision. */
+  updateTeamEvent(teamId: string, id: string, patch: { metadata?: Record<string, unknown>; content?: string }): TeamEvent | undefined {
+    const row = this.db.prepare('SELECT * FROM team_event WHERE team_id=? AND id=?').get(teamId, id)
+    if (!row) return undefined
+    const current = this.teamEventOf(row)
+    const next = { ...current, ...(patch.content === undefined ? {} : { content: patch.content }),
+      metadata: patch.metadata === undefined ? current.metadata : { ...current.metadata, ...patch.metadata } }
+    this.db.prepare('UPDATE team_event SET content=?, metadata=? WHERE team_id=? AND id=?')
+      .run(next.content, JSON.stringify(next.metadata), teamId, id)
+    return next
+  }
+  /** Create or update one Team turn. */
+  saveTeamTurn(turn: TeamTurn): void {
+    this.db.prepare(`INSERT INTO team_turn
+      (id, team_id, seq, role, trigger_event, state, session_id, output_event, abort_reason, error, usage, started_at, ended_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET state=excluded.state, session_id=excluded.session_id, output_event=excluded.output_event,
+        abort_reason=excluded.abort_reason, error=excluded.error, usage=excluded.usage, started_at=excluded.started_at, ended_at=excluded.ended_at`)
+      .run(turn.id, turn.teamId, turn.seq, turn.role, turn.triggerEventId, turn.state, turn.sessionId ?? null,
+        turn.outputEventId ?? null, turn.abortReason ?? null, turn.error ?? null, turn.usage === undefined ? null : JSON.stringify(turn.usage),
+        turn.startedAt ?? null, turn.endedAt ?? null)
+  }
+  /** One Team turn by id. */
+  getTeamTurn(id: string): TeamTurn | undefined {
+    const row = this.db.prepare('SELECT * FROM team_turn WHERE id=?').get(id)
+    return row ? this.teamTurnOf(row) : undefined
+  }
+  /** All turns for one Team, oldest first. */
+  listTeamTurns(teamId: string): TeamTurn[] {
+    return this.db.prepare('SELECT * FROM team_turn WHERE team_id=? ORDER BY seq').all(teamId).map(row => this.teamTurnOf(row))
+  }
+  /** Delete a Team's thread and turn rows when the Team record is removed. */
+  deleteTeamThread(teamId: string): void {
+    this.atomic(() => {
+      this.db.prepare('DELETE FROM team_event WHERE team_id=?').run(teamId)
+      this.db.prepare('DELETE FROM team_turn WHERE team_id=?').run(teamId)
+    })
+  }
+  private teamEventOf(row: Record<string, unknown>): TeamEvent {
+    const type = String(row.actor_type)
+    const role = row.actor_role === null || row.actor_role === undefined ? undefined : String(row.actor_role)
+    const actor: TeamEvent['actor'] = type === 'human' ? { type: 'human', id: String(row.actor_id ?? ''),
+      ...row.actor_name ? { displayName: String(row.actor_name) } : {} }
+      : type === 'role' && role ? { type: 'role', role: role as TeamRole,
+        name: String(row.actor_name ?? role) }
+      : type === 'router' ? { type: 'router', name: String(row.actor_name) === 'ingress' ? 'ingress' : 'handoff' }
+      : { type: 'system' }
+    return { id: String(row.id), teamId: String(row.team_id), seq: Number(row.seq), kind: String(row.kind) as TeamEvent['kind'],
+      createdAt: String(row.created_at), actor, content: String(row.content), mentions: JSON.parse(String(row.mentions ?? '[]')) as TeamEvent['mentions'],
+      ...(row.reply_to ? { replyTo: String(row.reply_to) } : {}), ...(row.turn_id ? { turnId: String(row.turn_id) } : {}),
+      ...(row.client_id ? { clientId: String(row.client_id) } : {}), metadata: JSON.parse(String(row.metadata ?? '{}')) as Record<string, unknown> }
+  }
+  private teamTurnOf(row: Record<string, unknown>): TeamTurn {
+    return { id: String(row.id), teamId: String(row.team_id), seq: Number(row.seq), role: String(row.role) as TeamTurn['role'],
+      triggerEventId: String(row.trigger_event), state: String(row.state) as TeamTurn['state'],
+      ...(row.started_at ? { startedAt: String(row.started_at) } : {}), ...(row.ended_at ? { endedAt: String(row.ended_at) } : {}),
+      ...(row.session_id ? { sessionId: String(row.session_id) } : {}), ...(row.output_event ? { outputEventId: String(row.output_event) } : {}),
+      ...(row.abort_reason ? { abortReason: String(row.abort_reason) as TeamTurn['abortReason'] } : {}),
+      ...(row.error ? { error: String(row.error) } : {}), ...(row.usage ? { usage: JSON.parse(String(row.usage)) as TeamTurn['usage'] } : {}) }
   }
 
   /** Versioned settings snapshots; the current settings are the snapshot of the latest revision. */

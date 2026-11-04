@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
 import { usePanel, mount, all, find, tab, click, type, text, field, at } from './fixtures/panel.tsx'
 import { server } from './fixtures/panel-server.ts'
+import type { TeamEvent } from '../src/app/team-thread.ts'
 
 usePanel()
 it('lists teams with their state, progress and member dots, and opens the six role cards', async () => {
@@ -66,7 +67,7 @@ it('starts a team from the form and opens the new team', async () => {
   await type(field<HTMLInputElement>(zh.teamDirectoryRun), '/tmp/repo')
   await click(zh.teamStart)
   expect(server.requests.find(request => request.path === 'teams' && request.method === 'POST'))
-    .toMatchObject({ body: { task: 'Ship the release', title: '发布修复', directory: '/tmp/repo' } })
+    .toMatchObject({ body: { task: 'Ship the release', title: '发布修复', directory: '/tmp/repo', mode: 'open' } })
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('发布修复')
   expect(all('.dt-grid3 .dt-card').length).toBe(6)
 })
@@ -230,7 +231,7 @@ it('opens the summary from the teams list without leaving the list', async () =>
 })
 
 it('explains /team and the six roles when there are no teams', async () => {
-  server.teams = { items: [], details: {} }
+  server.teams = { items: [], details: {}, threads: {} }
   await mount()
   await click(tab(zh['tab.team']))
   expect(text()).toContain('/team <task>')
@@ -241,4 +242,40 @@ it('reports a missing team instead of rendering an empty page', async () => {
   at({ page: 'team', id: 'missing' })
   await mount()
   expect(text()).toContain(zh.teamNotFound)
+})
+
+it('renders an open team thread and sends a human message', async () => {
+  const team = server.teams.details['team-1']!
+  team.mode = 'open'; team.activity = 'active'; team.state = 'running'
+  const event: TeamEvent = { id: 'event-1', teamId: team.id, seq: 1, kind: 'message', createdAt: new Date().toISOString(),
+    actor: { type: 'human', id: 'local' }, content: 'Fix the login redirect.', mentions: [],
+    metadata: { messageKind: 'task', delivery: 'injected' } }
+  server.teams.threads[team.id] = { teamId: team.id, events: [event], turns: [], nextAfter: 1, activity: 'active' }
+  await mount()
+  await click(tab(zh['tab.team']))
+  await click(all('.dt-open').find(button => button.textContent === '修复登录页回归')!)
+  expect(text()).toContain(zh.teamThread)
+  expect(text()).toContain('Fix the login redirect.')
+  const composer = document.querySelector<HTMLTextAreaElement>('.dt-thread-composer textarea')!
+  await type(composer, 'Use the existing middleware @developer')
+  await click(zh.teamMessageSend)
+  expect(server.requests.find(request => request.path === 'teams/team-1/messages' && request.method === 'POST'))
+    .toMatchObject({ body: { content: 'Use the existing middleware @developer', mentions: ['developer'] } })
+  expect(text()).toContain(zh.teamMessageQueued)
+})
+
+it('resolves an open team approval from the thread', async () => {
+  const team = server.teams.details['team-1']!
+  team.mode = 'open'; team.activity = 'waiting'; team.waiting_for = 'approval'; team.state = 'running'
+  const approval: TeamEvent = { id: 'approval-1', teamId: team.id, seq: 1, kind: 'approval', createdAt: new Date().toISOString(),
+    actor: { type: 'role', role: 'developer', name: 'Developer' }, content: 'Confirm the deploy target.', mentions: [],
+    metadata: { task: 'Confirm the deploy target.', role: 'developer' } }
+  server.teams.threads[team.id] = { teamId: team.id, events: [approval], turns: [], nextAfter: 1, activity: 'waiting', waitingFor: 'approval' }
+  await mount()
+  await click(tab(zh['tab.team']))
+  await click(all('.dt-open').find(button => button.textContent === '修复登录页回归')!)
+  expect(text()).toContain('Confirm the deploy target.')
+  await click(zh.teamApprove)
+  expect(server.requests.find(request => request.path === 'teams/team-1/approvals/approval-1' && request.method === 'POST'))
+    .toMatchObject({ body: { approved: true } })
 })

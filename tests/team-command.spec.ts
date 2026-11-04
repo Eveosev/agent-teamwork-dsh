@@ -156,3 +156,14 @@ describe('/team', () => {
     expect(host.runtime.teams.get(id)?.state).toBe('stopped')
   })
 })
+
+it('starts an open team with --open', async () => {
+  await vi.waitFor(() => expect(command()).toBeDefined())
+  const result = await command().handler({ agent: host.agents.get(host.runtime.masterId), rawInput: '--open Explore the cache invalidation path' }) as
+    { kind: string; text: string }
+  expect(result.kind).toBe('success')
+  const team = host.runtime.teams.list()[0]!
+  expect(team.mode).toBe('open')
+  expect(host.runtime.teams.get(team.id)?.task).toBe('Explore the cache invalidation path')
+  expect(host.runtime.teams.stop(team.id)).toBe(true)
+})

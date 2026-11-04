@@ -18,7 +18,7 @@ import type { DshExecutor } from '../executor/dsh.ts'
 import type { Health } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import type { Sessions } from './sessions.ts'
-import type { Teams } from './teams.ts'
+import { TEAM_ROLES, type Teams } from './teams.ts'
 import type { Store } from './store.ts'
 import type { TextCache } from './cache.ts'
 import type { LinkTarget, ViewHost } from './views/records.ts'
@@ -37,7 +37,7 @@ export interface HttpHost {
   readonly sources: SourceRegistry
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'ensure'>
-  readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'continueTeam' | 'stop' | 'remove' | 'activeCount' | 'readFile'>
+  readonly teams: Pick<Teams, 'list' | 'get' | 'create' | 'continueTeam' | 'stop' | 'remove' | 'activeCount' | 'readFile' | 'thread' | 'sendMessage' | 'resolveApproval'>
   /** Admits browser image uploads into durable attachment references for a Team continuation. */
   admitImages(images: readonly TeamImageUpload[]): Promise<ImageBlock[]>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
@@ -63,7 +63,7 @@ export interface HttpHost {
  * Represents a client-facing 400 or 404 error raised during management route parsing or lookup.
  * Route handlers throw it when request bodies are malformed or target records are missing, and registerHttp serializes its status and message in the HTTP response.
  */
-class RouteError extends Error { constructor(readonly status: 400 | 404, message: string) { super(message) } }
+class RouteError extends Error { constructor(readonly status: 400 | 404 | 409, message: string) { super(message) } }
 async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<unknown> {
   let size = 0; const chunks: Buffer[] = []
   for await (const chunk of req) {
@@ -153,7 +153,11 @@ const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
 const TeamCreateRequest = z.object({ task: z.string().trim().min(1).max(8000), title: z.string().trim().max(120).optional(),
-  directory: z.string().trim().min(1).optional() }).strict()
+  directory: z.string().trim().min(1).optional(), mode: z.enum(['open', 'pipeline']).optional() }).strict()
+const TeamThreadQuery = z.object({ after: count.default(0), limit: limit(100, 200) }).strict()
+const TeamMessageRequest = z.object({ content: z.string().trim().min(1).max(20_000),
+  mentions: z.array(z.enum(TEAM_ROLES)).max(6).optional(), clientId: z.string().trim().min(1).max(200).optional() }).strict()
+const TeamApprovalRequest = z.object({ approved: z.boolean(), reason: z.string().trim().max(2000).optional() }).strict()
 const TeamImage = z.object({ mediaType: z.enum(TEAM_IMAGE_TYPES), data: z.string().min(1).max(12_000_000),
   name: z.string().trim().max(200).optional() }).strict()
 const TeamContinueRequest = z.object({ instruction: z.string().trim().max(8000).optional(),
@@ -206,6 +210,25 @@ function routes(runtime: HttpHost): Routes {
       if (!file) throw new RouteError(404, 'Team file not found')
       return file
     },
+    'GET teams/:id/thread': ({ params, query }) => {
+      team(params.id)
+      const { after, limit } = TeamThreadQuery.parse(query)
+      return runtime.teams.thread(params.id, after, limit)
+    },
+    'POST teams/:id/messages': async ({ params, body }) => {
+      const current = team(params.id)
+      if (current.state !== 'running') throw new RouteError(409, 'The Team is not running; continue it before sending a message')
+      if ((current.mode ?? 'pipeline') !== 'open') throw new RouteError(400, 'Human messages require an open Team')
+      const request = TeamMessageRequest.parse(await body())
+      try { return runtime.teams.sendMessage(params.id, request.content, request.mentions, request.clientId) }
+      catch (error) { throw new RouteError(400, error instanceof Error ? error.message : String(error)) }
+    },
+    'POST teams/:id/approvals/:eventId': async ({ params, body }) => {
+      team(params.id)
+      const request = TeamApprovalRequest.parse(await body())
+      try { return runtime.teams.resolveApproval(params.id, params.eventId, request.approved, request.reason ?? '') }
+      catch (error) { throw new RouteError(400, error instanceof Error ? error.message : String(error)) }
+    },
     'POST teams': async ({ body }) => {
       const request = TeamCreateRequest.parse(await body())
       const settings = store.settings()
@@ -213,7 +236,7 @@ function routes(runtime: HttpHost): Routes {
       const limit = Math.min(3, Math.max(1, settings.executor.maxWorkers))
       if (runtime.teams.activeCount >= limit) throw new RouteError(400, `At most ${limit} teams run at once; wait for one to finish`)
       const agent = await runtime.sessions.ensure(runtime.masterId, runtime.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
-      return { team: runtime.teams.create(request.task, agent, request.title ?? '', request.directory) }
+      return { team: runtime.teams.create(request.task, agent, request.title ?? '', request.directory, [], request.mode ?? 'pipeline') }
     },
     'POST teams/:id/continue': async ({ params, body }) => {
       const source = team(params.id)

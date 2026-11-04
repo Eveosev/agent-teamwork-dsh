@@ -8,7 +8,8 @@ import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-
 import type { Api, ApiResponse, RouteParams } from '../../src/app/api.ts'
 import { SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInPart, builtInParts, composePrompt, composeSkill, defaultPrompts,
   environmentSection, policySection, promptParts } from '../../src/app/prompts.ts'
-import type { Team, TeamMember, TeamSummary } from '../../src/app/teams.ts'
+import type { Team, TeamMember, TeamMessageResult, TeamSummary } from '../../src/app/teams.ts'
+import type { TeamEvent, TeamThreadPage } from '../../src/app/team-thread.ts'
 import type { DroppedReply, HistoryView, Problem, PromptsView, SetupView, SourceStatusRow, SourceView, StateView, ThreadPageView,
   ThreadRow, TicketPageView,
   TicketRow, TicketStage,
@@ -91,7 +92,7 @@ export interface PanelServer {
   settings: Settings; revisions: Record<string, number>
   prompts: PromptsView
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
-  teams: { items: TeamSummary[]; details: Record<string, Team> }
+  teams: { items: TeamSummary[]; details: Record<string, Team>; threads: Record<string, TeamThreadPage> }
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'>; history: HistoryView
@@ -273,7 +274,7 @@ function teamFixtures(): PanelServer['teams'] {
         ...role === 'reviewer' ? { output: '## Evidence\n\n![Tab Tree side panel](review-shot.png)\n\nSee [the research note](docs/research.md#L74).' } : {},
         usage: { input: 1200, output: 300, cached: 850 } })),
   }
-  return { items: [teamSummary(running), teamSummary(done)], details: { [running.id]: running, [done.id]: done } }
+  return { items: [teamSummary(running), teamSummary(done)], details: { [running.id]: running, [done.id]: done }, threads: {} }
 }
 function initial(): PanelServer {
   const settings = SettingsSchema.parse({
@@ -371,6 +372,38 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET teams': { answer: () => ({ items: server.teams.items,
     active: server.teams.items.filter(team => team.state === 'running').length }) },
   'GET teams/:id': { answer: ({ params }) => server.teams.details[params.id] ?? refuse(404, `No team ${params.id}`) },
+  'GET teams/:id/thread': { query: ['after', 'limit'], answer: ({ params, query }) => {
+    const team = server.teams.details[params.id]
+    if (!team) return refuse(404, `No team ${params.id}`)
+    const stored = server.teams.threads[params.id] ?? { teamId: params.id, events: [], turns: [], nextAfter: 0,
+      activity: team.activity ?? (team.state === 'running' ? 'active' : 'terminal'), ...team.waiting_for ? { waitingFor: team.waiting_for } : {} }
+    const after = Number(query.after ?? 0), limit = Number(query.limit ?? 100)
+    const events = stored.events.filter(event => event.seq > after).slice(0, limit)
+    return { ...stored, events, nextAfter: events.at(-1)?.seq ?? after }
+  } },
+  'POST teams/:id/messages': { body: true, answer: ({ params, body }) => {
+    const team = server.teams.details[params.id]
+    if (!team) return refuse(404, `No team ${params.id}`)
+    if (team.state !== 'running') return refuse(400, 'Team is not running; continue it before sending a message')
+    const page = server.teams.threads[params.id] ?? { teamId: params.id, events: [], turns: [], nextAfter: 0, activity: 'active' as const }
+    const event: TeamEvent = { id: `event-${page.events.length + 1}`, teamId: params.id, seq: page.events.length + 1, kind: 'message',
+      createdAt: new Date().toISOString(), actor: { type: 'human', id: 'local' }, content: body.content,
+      mentions: body.mentions ?? [], ...body.clientId ? { clientId: body.clientId } : {},
+      metadata: { delivery: 'queued', target: body.mentions?.[0] ?? null, reason: 'The current turn is still running' } }
+    page.events = [...page.events, event]; page.nextAfter = event.seq
+    server.teams.threads[params.id] = page
+    const result: TeamMessageResult = { event, delivery: 'queued', ...body.mentions?.[0] ? { target: body.mentions[0] } : {},
+      reason: 'The current turn is still running' }
+    return result
+  } },
+  'POST teams/:id/approvals/:eventId': { body: true, answer: ({ params, body }) => {
+    const page = server.teams.threads[params.id]
+    const event: TeamEvent = { id: `approval-${params.eventId}`, teamId: params.id, seq: (page?.events.length ?? 0) + 1,
+      kind: 'approval', createdAt: new Date().toISOString(), actor: { type: 'human', id: 'local' },
+      content: body.approved ? 'Approved' : 'Rejected', mentions: [], metadata: { approvalFor: params.eventId, approved: body.approved } }
+    if (page) { page.events = [...page.events, event]; page.nextAfter = event.seq }
+    return { event, delivery: 'injected', reason: body.approved ? 'approved' : 'rejected' } satisfies TeamMessageResult
+  } },
   'GET teams/:id/file': { query: ['path'], answer: ({ params, query }) => server.teams.details[params.id]
     ? { name: 'screenshot.png', mime: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lYz3WQAAAABJRU5ErkJggg==', path: query.path }
     : refuse(404, `No team ${params.id}`) },

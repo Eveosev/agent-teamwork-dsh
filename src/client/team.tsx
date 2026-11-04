@@ -8,6 +8,8 @@ import { valueLabel, type T } from './text.ts'
 import { ConfirmButton, Hint, LabelValue, LoadState, MarkdownLite, PageHead, Section, SessionButton, When } from './widgets.tsx'
 
 type Team = ApiResponse<'GET teams/:id'>
+type TeamThread = ApiResponse<'GET teams/:id/thread'>
+type ThreadEvent = TeamThread['events'][number]
 type TeamSummary = ApiResponse<'GET teams'>['items'][number]
 type TeamMember = Team['members'][number]
 type TeamState = Team['state']
@@ -43,6 +45,9 @@ const roleLabel = (t: T, role: TeamRole): string => valueLabel(t, 'teamRole', ro
 const runSourceLabel = (t: T, source: TeamRun['source'] | undefined): string => valueLabel(t, 'teamRunSource', source)
 const memberLabel = (t: T, state: MemberState): string => valueLabel(t, 'teamMemberState', state)
 const teamStateLabel = (t: T, state: TeamState): string => valueLabel(t, 'teamState', state)
+const deliveryLabel = (t: T, value: string): string => value === 'queued' ? t('teamDelivery.queued')
+  : value === 'injected' ? t('teamDelivery.injected') : value === 'ignored' ? t('teamDelivery.ignored')
+  : value === 'superseded' ? t('teamDelivery.superseded') : t('teamDelivery.accepted')
 const outcomeLabel = (t: T, outcome: TeamOutcome): string => outcome === 'achieved' ? t('teamOutcome.achieved')
   : outcome === 'not_achieved' ? t('teamOutcome.not_achieved') : t('teamOutcome.unverified')
 const outcomeTone = (outcome: TeamOutcome): TagTone => outcome === 'achieved' ? 'success'
@@ -193,6 +198,7 @@ function TeamLine({ team, reload }: { team: TeamSummary; reload: () => Promise<v
       <div className="dt-row-meta">
         <Tag tone={teamTone(team.state)}>{teamStateLabel(t, team.state)}</Tag>
         <OutcomeTag state={team.state} outcome={team.outcome} />
+        {team.mode && <Tag tone="outline">{t(`teamMode.${team.mode}`)}</Tag>}
         {(team.continued_from || team.continuations) && <Tag tone="info"
           title={team.continued_from ? `${t('teamContinuedFrom')}: ${team.continued_from_title ?? team.continued_from}` : t('teamContinued')}>
           {team.continuations && team.continuations > 1 ? t('teamContinuedTimes', { count: team.continuations }) : t('teamContinued')}</Tag>}
@@ -321,8 +327,9 @@ export function TeamStatus({ filter }: { filter: TeamFilter }) {
   const [task, setTask] = useState('')
   const [title, setTitle] = useState('')
   const [directory, setDirectory] = useState('')
+  const [mode, setMode] = useState<'open' | 'pipeline'>('open')
   const create = useAction(async () => {
-    const request = { task: task.trim(), ...(title.trim() ? { title: title.trim() } : {}), ...(directory.trim() ? { directory: directory.trim() } : {}) }
+    const request = { task: task.trim(), ...(title.trim() ? { title: title.trim() } : {}), ...(directory.trim() ? { directory: directory.trim() } : {}), mode }
     const { team } = await call('POST teams', { body: request })
     setTask(''); setTitle(''); setDirectory('')
     await reload()
@@ -350,6 +357,14 @@ export function TeamStatus({ filter }: { filter: TeamFilter }) {
         <label htmlFor="dt-team-title">{t('teamTitleLabel')}</label>
         <Input id="dt-team-title" value={title} placeholder={t('teamTitlePlaceholder')}
           onChange={event => setTitle(event.target.value)} />
+      </div>
+      <div className="dt-field">
+        <label htmlFor="dt-team-mode">{t('teamModeLabel')}</label>
+        <select id="dt-team-mode" className="dt-select" value={mode} onChange={event => setMode(event.target.value as 'open' | 'pipeline')}>
+          <option value="open">{t('teamMode.open')}</option>
+          <option value="pipeline">{t('teamMode.pipeline')}</option>
+        </select>
+        <div className="dt-hint">{t('teamModeHint')}</div>
       </div>
       <div className="dt-field">
         <label htmlFor="dt-team-directory">{t('teamDirectoryRun')}</label>
@@ -383,10 +398,102 @@ function TeamSummaryCard({ text, teamId }: { text: string; teamId: string }) {
   return <ReadingCard kind="summary" text={text} title={t('teamSummary')} action={t('teamSummaryRead')} teamId={teamId} />
 }
 
+/** One approval request with its human decision controls. */
+function ApprovalActions({ team, event, reload }: { team: Team; event: ThreadEvent; reload: () => Promise<void> }) {
+  const { t, call } = usePanel()
+  const decide = useAction(async (approved: boolean) => {
+    await call('POST teams/:id/approvals/:eventId', { id: team.id, eventId: event.id, body: { approved } })
+    await reload()
+  })
+  const pending = team.waiting_for === 'approval'
+  return <div className="dt-thread-approval-actions">
+    <Button variant="primary" size="sm" disabled={!pending || decide.busy} onClick={() => { void decide.run(true) }}>
+      {t('teamApprove')}
+    </Button>
+    <Button variant="outline" size="sm" disabled={!pending || decide.busy} onClick={() => { void decide.run(false) }}>
+      {t('teamReject')}
+    </Button>
+  </div>
+}
+
+/** The shared Team thread and the running-team composer. */
+function TeamThreadPanel({ team, thread, reload }: { team: Team; thread?: TeamThread; reload: () => Promise<void> }) {
+  const { t, call } = usePanel()
+  const [draft, setDraft] = useState('')
+  const [last, setLast] = useState('')
+  const send = useAction(async () => {
+    const content = draft.trim()
+    if (!content) return
+    const mentions = [...content.matchAll(/@([a-z]+)/gi)].map(match => match[1]!.toLowerCase())
+      .filter((role): role is TeamRole => (TEAM_ROLES as readonly string[]).includes(role))
+    const result = await call('POST teams/:id/messages', { id: team.id,
+      body: { content, ...mentions.length ? { mentions } : {}, clientId: `${Date.now()}-${Math.random().toString(36).slice(2)}` } })
+    setDraft('')
+    setLast(result.delivery === 'injected' ? t('teamMessageInjected') : result.delivery === 'queued' ? t('teamMessageQueued')
+      : result.delivery === 'ignored' ? t('teamMessageIgnored') : t('teamMessageAccepted'))
+    await reload()
+  })
+  const events = thread?.events ?? []
+  const latestApproval = [...events].reverse().find(event => event.kind === 'approval')
+  const waiting = team.waiting_for === 'approval'
+  return <div className="dt-thread">
+    {events.length ? <ol className="dt-thread-list">
+      {events.map(event => {
+        const who = event.actor.type === 'human' ? t('teamThreadHuman')
+          : event.actor.type === 'role' ? roleLabel(t, event.actor.role)
+          : event.actor.type === 'router' ? t('teamThreadRouter') : t('teamThreadSystem')
+        const delivery = typeof event.metadata.delivery === 'string' ? event.metadata.delivery : undefined
+        return <li className="dt-thread-item" data-kind={event.kind} data-actor={event.actor.type} key={event.id}>
+          <div className="dt-thread-head">
+            <span className="dt-thread-who">{who}</span>
+            <When at={event.createdAt} />
+            {delivery && <Tag tone={delivery === 'injected' ? 'success' : delivery === 'queued' ? 'warning' : 'neutral'}>
+              {deliveryLabel(t, delivery)}</Tag>}
+          </div>
+          {event.kind === 'approval' ? <div className="dt-thread-approval">
+            <div className="dt-thread-text">{event.content}</div>
+            {waiting && latestApproval?.id === event.id && <ApprovalActions team={team} event={event} reload={reload} />}
+          </div> : event.actor.type === 'role' ? <div className="dt-thread-text">
+            <MarkdownLite text={event.content} teamId={team.id} />
+          </div> : <div className="dt-thread-text">{event.content}</div>}
+          {typeof event.metadata.reason === 'string' && event.metadata.reason &&
+            <div className="dt-thread-reason">{event.metadata.reason}</div>}
+        </li>
+      })}
+    </ol> : <Hint>{t('teamThreadEmpty')}</Hint>}
+    {team.state === 'running' ? <div className="dt-thread-composer">
+      <textarea className="dt-textarea" rows={3} value={draft} placeholder={t('teamMessagePlaceholder')}
+        onChange={event => setDraft(event.target.value)}
+        onKeyDown={event => {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault()
+            if (!send.busy) void send.run()
+          }
+        }} />
+      <div className="dt-thread-composer-actions">
+        <div className="dt-hint">{last || t('teamMessageHint')}</div>
+        <Button variant="primary" size="sm" disabled={send.busy || !draft.trim()} onClick={() => { void send.run() }}>
+          {t('teamMessageSend')}
+        </Button>
+      </div>
+      <div className="dt-tag-group">
+        {TEAM_ROLES.map(role => <button type="button" className="dt-inline-button" key={role}
+          onClick={() => setDraft(current => `${current}${current && !current.endsWith(' ') ? ' ' : ''}@${role} `)}>
+          @{roleLabel(t, role)}
+        </button>)}
+      </div>
+      {waiting && <div className="dt-banner">{t('teamApprovalWaiting')}</div>}
+    </div> : null}
+    {team.state !== 'running' && <Hint>{t('teamThreadTerminal')}</Hint>}
+  </div>
+}
+
 /** Team detail: state and duration, the task, six role cards, and the lead's final summary. */
 export function TeamPage({ id }: { id: string }) {
   const { t, call, navigate } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET teams/:id', { id }), [id])
+  const thread = usePoll(() => data?.mode === 'open' ? call('GET teams/:id/thread', { id, query: { limit: 100 } }) : Promise.resolve(undefined),
+    [id, data?.mode], 2000)
   const running = data?.state === 'running'
   const now = useNow(running)
   if (!data) return <>
@@ -404,6 +511,8 @@ export function TeamPage({ id }: { id: string }) {
       <LabelValue label={t('teamCreated')} value={<When at={data.created_at} />} />
       <LabelValue label={running ? t('teamRunningFor') : t('teamDuration')}
         value={durationText(t, data.run_started_at ?? data.created_at, end)} />
+      {data.mode && <Tag tone="info">{t(`teamMode.${data.mode}`)}</Tag>}
+      {data.activity === 'waiting' && <Tag tone="warning">{data.waiting_for === 'approval' ? t('teamWaitingApproval') : t('teamWaitingHuman')}</Tag>}
       {data.rounds && <LabelValue label={t('teamRounds')} value={<>{data.rounds}<InfoTip text={t('teamRoundsHint')} /></>} />}
       {data.continuations && <LabelValue label={t('teamContinued')} value={data.continuations} />}
       {data.usage && <TokenUsageLine usage={data.usage} />}
@@ -436,6 +545,10 @@ export function TeamPage({ id }: { id: string }) {
       {data.previous_outcome && <div className="dt-tag-group"><OutcomeTag state="done" outcome={data.previous_outcome} /></div>}
       <ReadingCard kind="summary" text={data.previous_summary} teamId={data.id}
         title={`${t('teamPreviousAttempt')}${t('labelSeparator')}${t('teamSummary')}`} action={t('teamSummaryRead')} />
+    </Section>}
+    {data.mode === 'open' && <Section title={t('teamThread')} count={thread.data?.events.length ?? 0}>
+      {thread.error && <LoadState error={thread.error} loading={false} />}
+      <TeamThreadPanel team={data} thread={thread.data} reload={async () => { await Promise.all([reload(), thread.reload()]) }} />
     </Section>}
     <Section title={t('teamMembers')} count={TEAM_ROLES.length}>
       <div className="dt-grid3">{TEAM_ROLES.map(role => <MemberCard key={role} team={data} role={role} />)}</div>

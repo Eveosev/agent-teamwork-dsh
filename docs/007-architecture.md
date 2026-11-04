@@ -159,7 +159,7 @@ Its interfaces are grouped by purpose:
 - **Outbox receipts:** `replyStatus` and `receipts`, written only by Outbox. Receipt operations are `get`, `waiting`, `behind`, `add`, `settle` and `withdraw`. `behind` checks whether an earlier message for the same Ticket and conversation is waiting with fewer than three failures. A withdrawn message settles with `channelGone` or `channelIgnored`. Read queries expose failed and dropped replies through `failingReplies`, `droppedReplies` and `droppedSince`.
 - **Typed key-value records:** `get`, `set`, `delete` and `keys`, using entries from `KV`.
 
-`afterCommit` runs an action only after the transaction commits, never after rollback. Runtime reads records in their stored shape; the schema 11 migration converts older supported records at startup.
+`afterCommit` runs an action only after the transaction commits, never after rollback. Runtime reads records in their stored shape; the schema 12 migration converts older supported records at startup and adds the Team thread tables.
 
 ### Effects
 
@@ -242,7 +242,7 @@ Each model request binds the Session to the current prompt revision. The revisio
 
 ### Agent Team
 
-`Teams` (`src/app/teams.ts`) is a second execution mode beside Tickets. `/team <task>` is a DSH slash command registered by `Runtime.registerTeamCommand`; the panel's **Team** tab uses `GET/POST /orchestrator/api/teams`. A Team is a durable record in the KV store, not a Ticket: it has no Trigger, Eval, worktree, PR or outbound reply, so it does not consume a Worker slot.
+`Teams` (`src/app/teams.ts`) is a second execution mode beside Tickets. `/team <task>` is a DSH slash command registered by `Runtime.registerTeamCommand`; the panel's **Team** tab uses `GET/POST /orchestrator/api/teams`. A Team is a durable record in the KV store, not a Ticket: it has no Trigger, Eval, worktree, PR or outbound reply, so it does not consume a Worker slot. In open mode a Team also has rows in the `team_event` and `team_turn` tables; the thread is persisted there while the Team record keeps its state and counters.
 
 `Teams.create` refuses while processing is paused, and limits concurrent teams to the smaller of three and `executor.maxWorkers`. It starts six roles as managed DSH subagents through `ctx.subagents.startActivation` with `provider: 'spawn'`, `delivery: 'caller'`, the role's worker profile model and preset, and the Session that invoked the command. The flow is lead plan → researcher and developer in parallel → tester and reviewer in parallel → ops → lead synthesis. If a verifier returns `VERDICT: FAIL`, the lead writes repair instructions and the developer, tester and reviewer run again, for at most `executor.maxRounds` rounds (default 3). Each role's text, state, latest child Session id, per-activation run history (round, source, state, session id and timestamps), error, verdict, round and token usage are saved; the final synthesis is `team.summary`, with a separate `outcome` of `achieved`, `not_achieved` or `unverified`. Token counts come from `assistant/message` usage events on each child Session. A terminal team can be continued: `Teams.continueTeam` reuses the same record and id, moves it to the front of the list, preserves the previous attempt as `previous_summary` / `previous_outcome`, and starts a new six-role run in the same directory with the previous evidence, an optional instruction and optional uploaded screenshots. The continuation route admits browser image bytes through `ctx.attachments` before launching, so a wire caller cannot cite an attachment it did not upload. Older linked continuations keep `continued_from` for audit. A stop aborts the team's signal and disposes its activations. A process restart marks a running team `failed`, because child subagents are not resumed automatically. Role tool allowlists apply to Executor Sessions, not to subagents; team roles rely on their instructions and the sandbox. `GET teams/:id/file` exposes Markdown images and text links from a Team's working directory to the panel, rejecting paths that resolve outside it.
 
@@ -326,7 +326,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/notices.ts` | The main Session's notices and relays: `eventNotice`, `reportRelay`, `resultRelay` and `followupRelay` |
 | `src/app/store.ts` | The Store, and `Receipt`, a message of the outbox |
 | `src/app/store-read.ts` | `storeReads`: the Store's read queries for the views, the tools and the Sources' polls, which never write |
-| `src/app/migration.ts` | The schema 11 migration: one step from schema 10 that writes every stored record in its current shape |
+| `src/app/migration.ts` | Schema migrations: the schema 10 → 11 record rewrite and the current schema version |
 | `src/app/effects.ts` | Effects |
 | `src/app/versions.ts` | `Versions`: a record kept as numbered snapshots with a pointer to the current one, for the settings and the prompts |
 | `src/app/cache.ts` | `TextCache`: texts kept in memory within a size, the least recently used dropped first |
@@ -337,6 +337,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/skill-files.ts` | Packaged text: `promptFile`, which joins a file's one-sentence lines into paragraphs, and the bundled skills |
 | `src/app/sessions.ts` | Sessions |
 | `src/app/teams.ts` | `Teams`: the six-role Agent Team runtime behind `/team`, its durable records and member evidence |
+| `src/app/team-thread.ts` | Team thread, turn, ingress and handoff types, plus the bounded thread budgets |
 | `src/app/delivery.ts` | `AgentDelivery`: delivers a message to a DeepSeek Harness agent once per request id, also across a restored Session |
 | `src/app/retry-health.ts` | `RetryHealth`: which Sessions wait on a model budget retry, for the `models` health entry |
 | `src/app/role-models.ts` | Resolves the Eval and Executor models, and seeds a new Session with its role's model |
@@ -442,7 +443,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/settings.spec.ts` | Settings saves that race a model or account check, a Policy sync that a save outran, and the refusals of the pause, a sync and a block |
 | `tests/views.spec.ts` | What the management views derive from the Store, such as the Thread a dropped message belongs to |
 | `tests/timeline.spec.ts` | A Thread's pages and a Trigger's neighbours by time and then id, with every received Trigger's time in one form |
-| `tests/migration.spec.ts` | The schema 11 migration: every stored record in its current shape, and the refusal of older schemas |
+| `tests/migration.spec.ts` | Schema migrations: every stored record in its current shape, the schema 12 Team tables, and the refusal of older schemas |
 | `tests/store.spec.ts` | Repositories and their working sets, in SQLite as in memory, the kv area, with every key of `KV` spelled only in `src/kv.ts` and the migration, settings history and queries |
 | `tests/prompts.spec.ts` | Prompt validation, assembly and versions |
 | `tests/cards.spec.ts` | The rules the built-in text must state, file by file |
@@ -495,7 +496,7 @@ Read caches use bounded in-memory `TextCache` instances and are lost on restart.
 
 Nothing deletes old records yet, so these grow without bound: the `trigger`, `disposition` and `decision` rows; ended Tickets and their Threads; the outbox's receipts; and in `kv`, every saved settings revision and prompt version, the prompt revisions each Session worked under, and the Sources' records per Thread and per Issue or pull request.
 
-`SCHEMA_VERSION` only increases. A database of a newer version refuses to start; `src/app/migration.ts` upgrades a database of the pre-release schema 10 once, at start, and refuses an older one.
+`SCHEMA_VERSION` only increases (currently 12). A database of a newer version refuses to start; `src/app/migration.ts` upgrades a database of the pre-release schema 10 once, at start, and refuses an older one.
 
 ## Model-facing interfaces
 

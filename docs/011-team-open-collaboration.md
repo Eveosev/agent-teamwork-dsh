@@ -1,6 +1,10 @@
 # Agent Team: Open Collaboration
 
-**Status:** Draft design. This document describes a target architecture; it is not implemented yet.
+**Status:** Implemented for open mode in v1 (Phases 1–3). The thread, human ingress, handoff router, turn budget and human approvals are live; the optional follow-ups listed in §16 remain future work.
+
+The implementation lives in `src/app/team-thread.ts` (types and budgets), `src/app/teams.ts` (open loop, ingress, routing, approvals), `src/app/store.ts` (thread and turn persistence, schema 12), `src/app/http.ts` / `src/app/api.ts` (thread, message and approval routes), and `src/client/team.tsx` (thread, composer and approval controls). `docs/009-team.md` is the operator-facing description.
+
+**v1 implementation deviations from this target:** human ingress is deterministic (the hard rules in §7.1 plus a safe `queue` fallback); the model `IngressArbiter` call and its timing metadata are not enabled yet. The router's default sequence remains lead → developer → tester → reviewer → lead, with explicit `HANDOFF` lines overriding it, rather than asking the lead for every next step. Turns are serialized, child Sessions are fresh per turn, and approvals pause between turns; the optional persistent-session, concurrent-turn and tool-gate work in §16 is not implemented.
 
 **Scope:** Turn the six-role Agent Team from a fixed orchestration pipeline into an open, multi-agent, human-in-the-loop collaboration, while keeping an explicit control plane and hard safety bounds.
 

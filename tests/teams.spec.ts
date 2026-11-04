@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { SettingsSchema, type Settings } from '../src/policy.ts'
 import { Teams, TEAM_ROLES, type TeamsHost } from '../src/app/teams.ts'
+import type { TeamEvent, TeamTurn } from '../src/app/team-thread.ts'
 import { KV } from '../src/kv.ts'
 
 const settings = (paused = false) => SettingsSchema.parse({ paused, executor: { profiles: {
@@ -12,8 +13,10 @@ const settings = (paused = false) => SettingsSchema.parse({ paused, executor: { 
 
 function bench(options: { paused?: boolean; pending?: boolean; modalities?: readonly string[]; custom?: Settings
   failFirst?: boolean; alwaysFail?: boolean; usage?: { input: number; output: number; cached: number }
-  liveUsage?: { input: number; output: number; cached: number }; badSessions?: boolean } = {}) {
+  liveUsage?: { input: number; output: number; cached: number }; badSessions?: boolean; approvalRole?: string; failRole?: string } = {}) {
   const values = new Map<string, unknown>()
+  const eventRows: TeamEvent[] = []
+  const turnRows: TeamTurn[] = []
   const attempts = new Map<string, number>()
   const usageListeners: ((session: { id: string }, event: { type: string; usage?: Record<string, number> }) => void)[] = []
   const runs: { label: string; prompt: string; blocks: readonly { type: string; text?: string }[]; agentOptions?: unknown; preset?: string
@@ -26,7 +29,10 @@ function bench(options: { paused?: boolean; pending?: boolean; modalities?: read
     const attempt = (attempts.get(role) ?? 0) + 1; attempts.set(role, attempt)
     const verdict = role !== 'Tester' && role !== 'Reviewer' ? '' : options.alwaysFail || options.failFirst && attempt === 1 ? '\n\nVERDICT: FAIL'
       : '\n\nVERDICT: PASS'
-    const output = { output: [{ type: 'text', text: `${spec.label} result${verdict}` }], stopReason: 'completed' as const }
+    const approval = options.failRole !== role && options.approvalRole === role && attempt === 1 ? '\n\nAPPROVAL_REQUEST: Confirm the deploy target.' : ''
+    const output = options.failRole === role
+      ? { output: [], stopReason: 'failed' as const, diagnostic: 'role failed on purpose' }
+      : { output: [{ type: 'text', text: `${spec.label} result${verdict}${approval}` }], stopReason: 'completed' as const }
     const childId = `child-${runs.length}`
     const result = options.pending ? new Promise<never>(() => {}) : options.liveUsage ? new Promise<typeof output>(resolve => {
       setTimeout(() => {
@@ -48,7 +54,28 @@ function bench(options: { paused?: boolean; pending?: boolean; modalities?: read
     get: () => { throw new Error('cannot get property "sessions" without inject') } })
   const host: TeamsHost = { context: context as never, masterId: 'master', stateDir: '/tmp/team-state',
     settings: () => options.custom ?? settings(options.paused), logger: { warn: () => {} }, store: { get: key => values.get(key) as never,
-      set: (key, value) => { values.set(key, value) }, delete: key => { values.delete(key) }, atomic: <T>(run: () => T) => run() } }
+      set: (key, value) => { values.set(key, value) }, delete: key => { values.delete(key) }, atomic: <T>(run: () => T) => run(),
+      appendTeamEvent: (input: Omit<TeamEvent, 'seq'>) => {
+        const duplicate = input.clientId ? eventRows.find(event => event.teamId === input.teamId && event.clientId === input.clientId) : undefined
+        if (duplicate) return duplicate
+        const event = { ...input, seq: Math.max(0, ...eventRows.filter(row => row.teamId === input.teamId).map(row => row.seq)) + 1 }
+        eventRows.push(event); return event
+      },
+      listTeamEvents: (teamId: string, after = 0, limit = 200) => eventRows.filter(event => event.teamId === teamId && event.seq > after)
+        .slice(0, limit),
+      latestTeamEventSeq: (teamId: string) => Math.max(0, ...eventRows.filter(event => event.teamId === teamId).map(event => event.seq)),
+      updateTeamEvent: (teamId: string, id: string, patch: { metadata?: Record<string, unknown>; content?: string }) => {
+        const event = eventRows.find(row => row.teamId === teamId && row.id === id)
+        if (!event) return undefined
+        if (patch.content !== undefined) event.content = patch.content
+        if (patch.metadata) event.metadata = { ...event.metadata, ...patch.metadata }
+        return event
+      },
+      saveTeamTurn: (turn: TeamTurn) => { const index = turnRows.findIndex(row => row.id === turn.id); if (index === -1) turnRows.push(turn); else turnRows[index] = turn },
+      getTeamTurn: (id: string) => turnRows.find(turn => turn.id === id),
+      listTeamTurns: (teamId: string) => turnRows.filter(turn => turn.teamId === teamId).sort((a, b) => a.seq - b.seq),
+      deleteTeamThread: (teamId: string) => { for (const event of eventRows.filter(row => row.teamId === teamId)) eventRows.splice(eventRows.indexOf(event), 1)
+        for (const turn of turnRows.filter(row => row.teamId === teamId)) turnRows.splice(turnRows.indexOf(turn), 1) } } }
   return { teams: new Teams(host), runs, subagents, llm, store: host.store }
 }
 const parent = { id: 'master' } as never
@@ -299,5 +326,70 @@ describe('Teams', () => {
     await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('stopped'))
     expect(runs[0]!.signal.aborted).toBe(true)
     expect(teams.get(team.id)?.members[0]!.state).toBe('stopped')
+  })
+})
+
+describe('open Team collaboration', () => {
+  it('runs the open loop through plan, implementation and verification', async () => {
+    const { teams, runs } = bench()
+    const team = teams.create('open task', parent, '', undefined, [], 'open')
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    const result = teams.get(team.id)!
+    expect(result.mode).toBe('open')
+    expect(result.outcome).toBe('achieved')
+    expect(runs.map(run => run.label.split(' · ')[1])).toEqual(['Team lead', 'Developer', 'Tester', 'Reviewer', 'Team lead'])
+    const page = teams.thread(team.id)
+    expect(page.events[0]).toMatchObject({ kind: 'message', actor: { type: 'human' } })
+    expect(page.events.some(event => event.kind === 'message' && event.actor.type === 'role')).toBe(true)
+    expect(page.turns.map(turn => turn.state)).toEqual(['completed', 'completed', 'completed', 'completed', 'completed'])
+  })
+
+  it('queues a human message while a turn runs', async () => {
+    const { teams, runs } = bench({ pending: true })
+    const team = teams.create('open task', parent, '', undefined, [], 'open')
+    await vi.waitFor(() => expect(runs.length).toBe(1))
+    const result = teams.sendMessage(team.id, 'Use the existing middleware.', ['developer'])
+    expect(result.delivery).toBe('queued')
+    expect(result.target).toBe('developer')
+    expect(teams.thread(team.id).events.at(-1)).toMatchObject({ content: 'Use the existing middleware.', metadata: { delivery: 'queued' } })
+    expect(teams.stop(team.id)).toBe(true)
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('stopped'))
+    expect(teams.thread(team.id).events.find(event => event.content === 'Use the existing middleware.')?.metadata.delivery)
+      .toBe('superseded')
+  })
+
+  it('pauses for a human approval and resumes after it is granted', async () => {
+    const { teams } = bench({ approvalRole: 'Developer' })
+    const team = teams.create('open task', parent, '', undefined, [], 'open')
+    await vi.waitFor(() => expect(teams.get(team.id)?.waiting_for).toBe('approval'))
+    const request = teams.thread(team.id).events.find(event => event.kind === 'approval')!
+    expect(request).toBeTruthy()
+    teams.resolveApproval(team.id, request.id, true, 'Use staging.')
+    await vi.waitFor(() => expect(teams.get(team.id)?.state).toBe('done'))
+    expect(teams.get(team.id)?.outcome).toBe('achieved')
+    expect(teams.thread(team.id).events.some(event => event.kind === 'approval' && event.metadata.approved === true)).toBe(true)
+  })
+
+  it('parks an open team when a role fails instead of retrying automatically', async () => {
+    const { teams, runs } = bench({ failRole: 'Developer' })
+    const team = teams.create('open task', parent, '', undefined, [], 'open')
+    await vi.waitFor(() => expect(teams.get(team.id)?.waiting_for).toBe('human'))
+    expect(runs.map(run => run.label.split(' · ')[1])).toEqual(['Team lead', 'Developer'])
+    expect(teams.thread(team.id).turns.at(-1)?.state).toBe('failed')
+    expect(teams.get(team.id)?.state).toBe('running')
+    const resumed = teams.sendMessage(team.id, 'Use a simpler implementation.')
+    expect(resumed.delivery).toBe('injected')
+    expect(teams.stop(team.id)).toBe(true)
+  })
+
+  it('interrupts the active turn when a human redirects it', async () => {
+    const { teams, runs } = bench({ pending: true })
+    const team = teams.create('open task', parent, '', undefined, [], 'open')
+    await vi.waitFor(() => expect(runs.length).toBe(1))
+    const result = teams.sendMessage(team.id, 'stop and use the existing middleware instead')
+    expect(result.delivery).toBe('injected')
+    await vi.waitFor(() => expect(teams.thread(team.id).turns[0]?.state).toBe('interrupted'))
+    expect(teams.get(team.id)?.state).toBe('running')
+    expect(teams.stop(team.id)).toBe(true)
   })
 })
