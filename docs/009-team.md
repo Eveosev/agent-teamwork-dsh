@@ -2,6 +2,8 @@
 
 `/team` starts a six-role team for one task. It is a local-first orchestration mode: the Session that invokes `/team` creates a durable Team record, runs the roles as managed DSH subagents, and the panel shows each role's state, session and evidence. It does not need the GitHub or Feishu setup that Tickets need, so it also works while the Overview still reports a deployment problem.
 
+> **Design note:** the target open-collaboration model — shared Team thread, human ingress, role handoffs and router-controlled dispatch — is described in [011-team-open-collaboration.md](011-team-open-collaboration.md). That document is a design proposal, not current behavior.
+
 ## Use
 
 In any DSH chat (the invoking Session becomes the team's parent):
